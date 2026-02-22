@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/urfave/cli/v2"
 )
@@ -183,13 +184,19 @@ func (b *CLIBuilder) GetIntrospectCommand() *cli.Command {
 				return err
 			}
 
+			// Extract schema from response (unwrap the data field)
+			var schema interface{} = result
+			if data, ok := result["data"]; ok {
+				schema = data
+			}
+
 			// Format result
 			formatter, err := b.formatReg.Get(c.String("format"))
 			if err != nil {
 				return err
 			}
 
-			output, err := formatter.Format(result)
+			output, err := formatter.Format(schema.(map[string]interface{}))
 			if err != nil {
 				return err
 			}
@@ -286,6 +293,176 @@ func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 	}
 }
 
+// GetQueriesCommand returns the queries listing command
+func (b *CLIBuilder) GetQueriesCommand() *cli.Command {
+	return &cli.Command{
+		Name:    "queries",
+		Aliases: []string{"q-list"},
+		Usage:   "List all available Query fields",
+		Description: "Display all available GraphQL Query fields. " +
+			"Optionally include descriptions and arguments. " +
+			"Use --filter to search by field name.",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:    "url",
+				Aliases: []string{"u"},
+				Usage:   "GraphQL endpoint URL",
+				Value:   b.config.URL,
+			},
+			&cli.BoolFlag{
+				Name:    "debug",
+				Aliases: []string{"d"},
+				Usage:   "Enable debug mode (logs HTTP requests/responses)",
+				Value:   b.config.Debug,
+			},
+			&cli.BoolFlag{
+				Name:  "desc",
+				Usage: "Include field descriptions",
+			},
+			&cli.BoolFlag{
+				Name:  "args",
+				Usage: "Include field arguments",
+			},
+			&cli.StringFlag{
+				Name:  "filter",
+				Usage: "Filter fields by name (case-insensitive substring match)",
+			},
+			&cli.StringFlag{
+				Name:    "format",
+				Aliases: []string{"f"},
+				Usage:   "Output format: toon (default), json, json-pretty, table, compact, llm",
+				Value:   "toon",
+			},
+		},
+		Action: func(c *cli.Context) error {
+			// Update config with command-line flags
+			b.config.Debug = c.Bool("debug")
+			b.client = NewHTTPClient(b.config)
+
+			// Build and execute introspection query
+			query := buildOperationListQuery("Query", c.Bool("desc"), c.Bool("args"))
+			opts := QueryOptions{Query: query}
+
+			result, err := b.client.Execute(context.Background(), ExecutionModeHTTP, opts)
+			if err != nil {
+				return err
+			}
+
+			// Extract fields from response
+			fields, err := extractOperationFields(result)
+			if err != nil {
+				return err
+			}
+
+			// Apply filter if provided
+			if filter := c.String("filter"); filter != "" {
+				fields = filterOperations(fields, filter)
+			}
+
+			// Format and output
+			formatter, err := b.formatReg.Get(c.String("format"))
+			if err != nil {
+				return err
+			}
+
+			output, err := formatter.Format(map[string]interface{}{
+				"queries": fields,
+			})
+			if err != nil {
+				return err
+			}
+
+			fmt.Println(output)
+			return nil
+		},
+	}
+}
+
+// GetMutationsCommand returns the mutations listing command
+func (b *CLIBuilder) GetMutationsCommand() *cli.Command {
+	return &cli.Command{
+		Name:    "mutations",
+		Aliases: []string{"m-list"},
+		Usage:   "List all available Mutation fields",
+		Description: "Display all available GraphQL Mutation fields. " +
+			"Optionally include descriptions and arguments. " +
+			"Use --filter to search by field name.",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:    "url",
+				Aliases: []string{"u"},
+				Usage:   "GraphQL endpoint URL",
+				Value:   b.config.URL,
+			},
+			&cli.BoolFlag{
+				Name:    "debug",
+				Aliases: []string{"d"},
+				Usage:   "Enable debug mode (logs HTTP requests/responses)",
+				Value:   b.config.Debug,
+			},
+			&cli.BoolFlag{
+				Name:  "desc",
+				Usage: "Include field descriptions",
+			},
+			&cli.BoolFlag{
+				Name:  "args",
+				Usage: "Include field arguments",
+			},
+			&cli.StringFlag{
+				Name:  "filter",
+				Usage: "Filter fields by name (case-insensitive substring match)",
+			},
+			&cli.StringFlag{
+				Name:    "format",
+				Aliases: []string{"f"},
+				Usage:   "Output format: toon (default), json, json-pretty, table, compact, llm",
+				Value:   "toon",
+			},
+		},
+		Action: func(c *cli.Context) error {
+			// Update config with command-line flags
+			b.config.Debug = c.Bool("debug")
+			b.client = NewHTTPClient(b.config)
+
+			// Build and execute introspection query
+			query := buildOperationListQuery("Mutation", c.Bool("desc"), c.Bool("args"))
+			opts := QueryOptions{Query: query}
+
+			result, err := b.client.Execute(context.Background(), ExecutionModeHTTP, opts)
+			if err != nil {
+				return err
+			}
+
+			// Extract fields from response
+			fields, err := extractOperationFields(result)
+			if err != nil {
+				return err
+			}
+
+			// Apply filter if provided
+			if filter := c.String("filter"); filter != "" {
+				fields = filterOperations(fields, filter)
+			}
+
+			// Format and output
+			formatter, err := b.formatReg.Get(c.String("format"))
+			if err != nil {
+				return err
+			}
+
+			output, err := formatter.Format(map[string]interface{}{
+				"mutations": fields,
+			})
+			if err != nil {
+				return err
+			}
+
+			fmt.Println(output)
+			return nil
+		},
+	}
+}
+
 // RegisterCommands returns all CLI commands for the app
 func (b *CLIBuilder) RegisterCommands(app *cli.App) {
 	app.Commands = append(app.Commands,
@@ -293,6 +470,8 @@ func (b *CLIBuilder) RegisterCommands(app *cli.App) {
 		b.GetMutationCommand(),
 		b.GetIntrospectCommand(),
 		b.GetTypesCommand(),
+		b.GetQueriesCommand(),
+		b.GetMutationsCommand(),
 	)
 }
 
@@ -303,8 +482,9 @@ func (b *CLIBuilder) getOperationFlags() []cli.Flag {
 		&cli.StringFlag{
 			Name:    "url",
 			Aliases: []string{"u"},
-			Usage:   "GraphQL endpoint URL",
+			Usage:   "GraphQL endpoint URL (env: GRAPHQL_URL)",
 			Value:   b.config.URL,
+			EnvVars: []string{"GRAPHQL_URL"},
 		},
 		&cli.BoolFlag{
 			Name:    "debug",
@@ -453,4 +633,86 @@ func (b *CLIBuilder) outputResult(c *cli.Context, result map[string]interface{})
 
 	fmt.Println(output)
 	return nil
+}
+
+// buildOperationListQuery constructs an introspection query for Query or Mutation type
+func buildOperationListQuery(typeName string, includeDesc, includeArgs bool) string {
+	query := fmt.Sprintf(`
+	{
+		__type(name: "%s") {
+			fields {
+				name`, typeName)
+
+	if includeDesc {
+		query += `
+				description`
+	}
+
+	if includeArgs {
+		query += `
+				args {
+					name
+					type {
+						kind
+						name
+						ofType {
+							kind
+							name
+							ofType {
+								kind
+								name
+								ofType {
+									kind
+									name
+								}
+							}
+						}
+					}
+				}`
+	}
+
+	query += `
+			}
+		}
+	}`
+
+	return query
+}
+
+// extractOperationFields extracts the fields array from the introspection response
+func extractOperationFields(result map[string]interface{}) ([]interface{}, error) {
+	data, ok := result["data"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid response structure: missing 'data' field")
+	}
+
+	typeInfo, ok := data["__type"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid response structure: missing '__type' field")
+	}
+
+	fields, ok := typeInfo["fields"].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid response structure: missing 'fields' array")
+	}
+
+	return fields, nil
+}
+
+// filterOperations filters operations by name using case-insensitive substring matching
+func filterOperations(operations []interface{}, filter string) []interface{} {
+	var filtered []interface{}
+
+	for _, op := range operations {
+		if opMap, ok := op.(map[string]interface{}); ok {
+			if name, ok := opMap["name"].(string); ok {
+				// Case-insensitive substring match
+				if strings.Contains(strings.ToLower(name), strings.ToLower(filter)) {
+					filtered = append(filtered, op)
+				}
+			}
+		}
+	}
+
+	return filtered
 }
