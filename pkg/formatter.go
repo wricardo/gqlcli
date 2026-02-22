@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/toon-format/toon-go"
 )
 
 // JSONFormatter outputs data as JSON
@@ -101,8 +103,9 @@ func (f *CompactFormatter) Name() string {
 	return "compact"
 }
 
-// TOONFormatter outputs data in compact JSON format (Token-Optimized)
-// This reduces token usage by removing whitespace and null values
+// TOONFormatter outputs data in TOON format (Token-Optimized Object Notation)
+// Uses the official toon-go library: https://github.com/toon-format/toon-go
+// Reduces token usage by 40-60% compared to standard JSON
 type TOONFormatter struct{}
 
 // NewTOONFormatter creates a TOON formatter
@@ -117,16 +120,13 @@ func (f *TOONFormatter) Format(data map[string]interface{}) (string, error) {
 		dataField = data
 	}
 
-	// Strip null values to reduce size
-	cleaned := stripNullValues(dataField)
-
-	// Encode as compact JSON (no whitespace)
-	output, err := json.Marshal(cleaned)
+	// Encode using official TOON library's MarshalString
+	toonOutput, err := toon.MarshalString(dataField)
 	if err != nil {
-		return "", fmt.Errorf("encoding failed: %w", err)
+		return "", fmt.Errorf("TOON encoding failed: %w", err)
 	}
 
-	return string(output), nil
+	return toonOutput, nil
 }
 
 func (f *TOONFormatter) Name() string {
