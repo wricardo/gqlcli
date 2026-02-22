@@ -6,12 +6,69 @@
 
 A battle-tested, production-ready GraphQL CLI library and tool written in Go. Execute queries, mutations, explore schemas, and list operations against any GraphQL server with flexible output formats, extensible architecture, and zero external dependencies.
 
-**Perfect for:**
-- 🔧 DevOps & DevTools teams building internal GraphQL CLI tools
-- 🤖 AI/LLM workflows that need token-efficient output
-- 🧪 GraphQL API testing and debugging
-- 📊 Schema exploration and documentation
-- 🔌 Custom GraphQL client applications
+---
+
+## 🚀 Quick Start — See It In Action
+
+### Installation
+
+```bash
+go install github.com/wricardo/gqlcli/cmd/gql@latest
+# or clone and build
+git clone https://github.com/wricardo/gqlcli.git
+cd gqlcli && make build
+```
+
+### Basic Usage
+
+```bash
+# Discover what queries are available
+gql queries
+
+# Find mutations related to "campaign"
+gql mutations --filter campaign
+
+# Execute a query
+gql query --query "{ users { id name } }"
+
+# Try against a different server
+export GRAPHQL_URL=https://api.example.com/graphql
+gql queries --filter user
+```
+
+### Real Examples
+
+```bash
+# List all Query fields with descriptions
+gql queries --desc
+
+# Show mutation arguments and types
+gql mutations --args
+
+# Explore schema in readable format
+gql introspect --format table
+
+# Export schema as JSON
+gql introspect --format json > schema.json
+
+# Execute a mutation with variables
+gql mutation \
+  --mutation "mutation CreateUser(\$input: CreateUserInput!) { createUser(input: \$input) { id } }" \
+  --input '{"name":"Alice","email":"alice@example.com"}'
+
+# Use a query from a file
+gql query --query-file ./queries/getUser.graphql --variables '{"id":"123"}'
+```
+
+### Different Output Formats
+
+```bash
+gql queries --filter user -f json-pretty    # Pretty JSON
+gql queries --filter user -f table           # Aligned columns
+gql queries --filter user -f toon            # Token-optimized (default)
+gql queries --filter user -f llm             # Markdown for LLMs
+gql queries --filter user -f compact         # Minimal JSON
+```
 
 ---
 
@@ -22,8 +79,8 @@ A battle-tested, production-ready GraphQL CLI library and tool written in Go. Ex
 - **`mutation`** — Execute mutations with auto-wrapped input objects
 - **`introspect`** — Download and explore full GraphQL schema
 - **`types`** — List all schema types with filtering
-- **`queries`** — Discover available Query fields instantly (new!)
-- **`mutations`** — Discover available Mutation fields instantly (new!)
+- **`queries`** — Discover available Query fields instantly
+- **`mutations`** — Discover available Mutation fields instantly
 
 ### 📊 Multiple Output Formats
 - **`json`** — Full JSON (prettified or compact) for programmatic use
@@ -57,84 +114,7 @@ A battle-tested, production-ready GraphQL CLI library and tool written in Go. Ex
 
 ---
 
-## 📦 Installation
-
-### As a CLI Tool
-
-```bash
-go install github.com/wricardo/gqlcli/cmd/gql@latest
-```
-
-Or clone and build:
-```bash
-git clone https://github.com/wricardo/gqlcli.git
-cd gqlcli
-make build
-./bin/gql --help
-```
-
-### As a Go Library
-
-```bash
-go get github.com/wricardo/gqlcli
-```
-
----
-
-## 🚀 Quick Start
-
-### CLI Usage
-
-```bash
-# List available queries
-gql queries
-
-# Discover mutations
-gql mutations --filter sms --desc
-
-# Execute a query
-gql query --query "{ users { id name } }"
-
-# With environment variable
-export GRAPHQL_URL=https://api.example.com/graphql
-gql queries --filter campaign
-```
-
-### As a Library
-
-```go
-package main
-
-import (
-	"os"
-	"log"
-	"github.com/urfave/cli/v2"
-	"github.com/wricardo/gqlcli/pkg"
-)
-
-func main() {
-	cfg := &gqlcli.Config{
-		URL:     "http://localhost:8080/graphql",
-		Format:  "toon",
-		Timeout: 30,
-	}
-
-	builder := gqlcli.NewCLIBuilder(cfg)
-	app := &cli.App{
-		Name: "gql",
-		Usage: "GraphQL CLI",
-	}
-
-	builder.RegisterCommands(app)
-	if err := app.Run(os.Args); err != nil {
-		log.Fatal(err)
-	}
-}
-```
-
----
-
-## 📚 Usage Examples
+## 📚 Complete Usage Examples
 
 ### Discovering Operations
 
@@ -241,28 +221,6 @@ gql -u http://prod-api.example.com/graphql queries
 gql queries  # Uses GRAPHQL_URL or localhost:8080
 ```
 
-### Output Formats
-
-```bash
-# JSON (compact)
-gql queries -f json
-
-# JSON pretty-printed
-gql queries -f json-pretty
-
-# Table (human-readable)
-gql queries -f table
-
-# TOON (token-optimized, ~40-60% smaller than JSON)
-gql queries -f toon
-
-# Markdown (for LLMs/documentation)
-gql queries -f llm
-
-# Minimal compact format
-gql queries -f compact
-```
-
 ### Advanced: Save Results to File
 
 ```bash
@@ -349,6 +307,62 @@ gql types --output types.json
 -f, --format FORMAT          Output format (default: compact)
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
 -d, --debug                  Enable debug logging
+```
+
+---
+
+## 📦 Installation (Detailed)
+
+### As a CLI Tool
+
+```bash
+go install github.com/wricardo/gqlcli/cmd/gql@latest
+```
+
+Or clone and build:
+```bash
+git clone https://github.com/wricardo/gqlcli.git
+cd gqlcli
+make build
+./bin/gql --help
+```
+
+### As a Go Library
+
+```bash
+go get github.com/wricardo/gqlcli
+```
+
+### Using as a Library
+
+```go
+package main
+
+import (
+	"os"
+	"log"
+	"github.com/urfave/cli/v2"
+	"github.com/wricardo/gqlcli/pkg"
+)
+
+func main() {
+	cfg := &gqlcli.Config{
+		URL:     "http://localhost:8080/graphql",
+		Format:  "toon",
+		Timeout: 30,
+	}
+
+	builder := gqlcli.NewCLIBuilder(cfg)
+	app := &cli.App{
+		Name: "gql",
+		Usage: "GraphQL CLI",
+	}
+
+	builder.RegisterCommands(app)
+	if err := app.Run(os.Args); err != nil {
+		log.Fatal(err)
+	}
+}
 ```
 
 ---
