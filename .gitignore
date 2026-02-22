@@ -1,0 +1,35 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Build artifacts
+*.o
+*.a
+*.test
+*.out
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test coverage
+*.coverprofile
+coverage.out
+coverage.html
+
+# Go modules
+vendor/
+go.sum
+
+# Environment
+.env
+.env.local
