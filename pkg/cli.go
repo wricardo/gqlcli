@@ -39,6 +39,10 @@ func (b *CLIBuilder) GetQueryCommand() *cli.Command {
 			"Variables can be provided via --variables (inline JSON) or --variables-file.",
 		Flags: b.getOperationFlags(),
 		Action: func(c *cli.Context) error {
+			// Update config with command-line flags
+			b.config.Debug = c.Bool("debug")
+			b.client = NewHTTPClient(b.config)
+
 			// Get query from various sources
 			query, err := b.getQueryString(c)
 			if err != nil {
@@ -86,6 +90,10 @@ func (b *CLIBuilder) GetMutationCommand() *cli.Command {
 			},
 		),
 		Action: func(c *cli.Context) error {
+			// Update config with command-line flags
+			b.config.Debug = c.Bool("debug")
+			b.client = NewHTTPClient(b.config)
+
 			// Get mutation from various sources
 			mutation, err := b.getMutationString(c)
 			if err != nil {
@@ -141,6 +149,12 @@ func (b *CLIBuilder) GetIntrospectCommand() *cli.Command {
 				Usage:   "GraphQL endpoint URL",
 				Value:   b.config.URL,
 			},
+			&cli.BoolFlag{
+				Name:    "debug",
+				Aliases: []string{"d"},
+				Usage:   "Enable debug mode (logs HTTP requests/responses)",
+				Value:   b.config.Debug,
+			},
 			&cli.StringFlag{
 				Name:    "format",
 				Aliases: []string{"f"},
@@ -160,6 +174,10 @@ func (b *CLIBuilder) GetIntrospectCommand() *cli.Command {
 			},
 		},
 		Action: func(c *cli.Context) error {
+			// Update config with command-line flags
+			b.config.Debug = c.Bool("debug")
+			b.client = NewHTTPClient(b.config)
+
 			result, err := b.client.Introspect(context.Background())
 			if err != nil {
 				return err
@@ -201,6 +219,12 @@ func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 				Usage:   "GraphQL endpoint URL",
 				Value:   b.config.URL,
 			},
+			&cli.BoolFlag{
+				Name:    "debug",
+				Aliases: []string{"d"},
+				Usage:   "Enable debug mode (logs HTTP requests/responses)",
+				Value:   b.config.Debug,
+			},
 			&cli.StringFlag{
 				Name:  "filter",
 				Usage: "Filter types by name (case-insensitive substring match)",
@@ -218,6 +242,10 @@ func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 			},
 		},
 		Action: func(c *cli.Context) error {
+			// Update config with command-line flags
+			b.config.Debug = c.Bool("debug")
+			b.client = NewHTTPClient(b.config)
+
 			result, err := b.client.Introspect(context.Background())
 			if err != nil {
 				return err
@@ -277,6 +305,12 @@ func (b *CLIBuilder) getOperationFlags() []cli.Flag {
 			Aliases: []string{"u"},
 			Usage:   "GraphQL endpoint URL",
 			Value:   b.config.URL,
+		},
+		&cli.BoolFlag{
+			Name:    "debug",
+			Aliases: []string{"d"},
+			Usage:   "Enable debug mode (logs HTTP requests/responses)",
+			Value:   b.config.Debug,
 		},
 		&cli.StringFlag{
 			Name:     "query",

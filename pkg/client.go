@@ -25,6 +25,11 @@ func NewHTTPClient(cfg *Config) *HTTPClient {
 
 	restClient := resty.New().SetTimeout(timeout)
 
+	// Enable debug mode if configured
+	if cfg.Debug {
+		restClient.SetDebug(true)
+	}
+
 	// Add auth if configured
 	if cfg.Token != "" {
 		restClient.SetHeader("Authorization", fmt.Sprintf("Bearer %s", cfg.Token))

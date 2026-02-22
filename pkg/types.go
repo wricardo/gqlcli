@@ -13,7 +13,8 @@ type Config struct {
 	Auth  AuthConfig
 
 	// HTTP client settings
-	Timeout int // Request timeout in seconds (default: 30)
+	Timeout int  // Request timeout in seconds (default: 30)
+	Debug   bool // Enable debug logging (logs requests/responses)
 }
 
 // AuthConfig holds authentication configuration
