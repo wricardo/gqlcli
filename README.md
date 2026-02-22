@@ -13,61 +13,61 @@ A battle-tested, production-ready GraphQL CLI library and tool written in Go. Ex
 ### Installation
 
 ```bash
-go install github.com/wricardo/gqlcli/cmd/gql@latest
+go install github.com/wricardo/gqlcli/example/main.go@latest
 # or clone and build
 git clone https://github.com/wricardo/gqlcli.git
-cd gqlcli && make build
+cd gqlcli && make install
 ```
 
 ### Basic Usage
 
 ```bash
 # Discover what queries are available
-gql queries
+gqlcli queries
 
 # Find mutations related to "campaign"
-gql mutations --filter campaign
+gqlcli mutations --filter campaign
 
 # Execute a query
-gql query --query "{ users { id name } }"
+gqlcli query --query "{ users { id name } }"
 
 # Try against a different server
 export GRAPHQL_URL=https://api.example.com/graphql
-gql queries --filter user
+gqlcli queries --filter user
 ```
 
 ### Real Examples
 
 ```bash
 # List all Query fields with descriptions
-gql queries --desc
+gqlcli queries --desc
 
 # Show mutation arguments and types
-gql mutations --args
+gqlcli mutations --args
 
 # Explore schema in readable format
-gql introspect --format table
+gqlcli introspect --format table
 
 # Export schema as JSON
-gql introspect --format json > schema.json
+gqlcli introspect --format json > schema.json
 
 # Execute a mutation with variables
-gql mutation \
+gqlcli mutation \
   --mutation "mutation CreateUser(\$input: CreateUserInput!) { createUser(input: \$input) { id } }" \
   --input '{"name":"Alice","email":"alice@example.com"}'
 
 # Use a query from a file
-gql query --query-file ./queries/getUser.graphql --variables '{"id":"123"}'
+gqlcli query --query-file ./queries/getUser.graphql --variables '{"id":"123"}'
 ```
 
 ### Different Output Formats
 
 ```bash
-gql queries --filter user -f json-pretty    # Pretty JSON
-gql queries --filter user -f table           # Aligned columns
-gql queries --filter user -f toon            # Token-optimized (default)
-gql queries --filter user -f llm             # Markdown for LLMs
-gql queries --filter user -f compact         # Minimal JSON
+gqlcli queries --filter user -f json-pretty    # Pretty JSON
+gqlcli queries --filter user -f table           # Aligned columns
+gqlcli queries --filter user -f toon            # Token-optimized (default)
+gqlcli queries --filter user -f llm             # Markdown for LLMs
+gqlcli queries --filter user -f compact         # Minimal JSON
 ```
 
 ---
@@ -120,44 +120,44 @@ gql queries --filter user -f compact         # Minimal JSON
 
 ```bash
 # List all queries (TOON format — token-efficient)
-gql queries
+gqlcli queries
 
 # List with descriptions
-gql queries --desc
+gqlcli queries --desc
 
 # Show arguments and types
-gql queries --args
+gqlcli queries --args
 
 # Filter by name
-gql queries --filter user
-gql mutations --filter campaign
+gqlcli queries --filter user
+gqlcli mutations --filter campaign
 
 # Different formats
-gql queries -f json-pretty
-gql mutations -f table
+gqlcli queries -f json-pretty
+gqlcli mutations -f table
 ```
 
 ### Executing Queries
 
 ```bash
 # Simple query
-gql query --query "{ users { id name email } }"
+gqlcli query --query "{ users { id name email } }"
 
 # Query from file
-gql query --query-file ./queries/getUser.graphql
+gqlcli query --query-file ./queries/getUser.graphql
 
 # With variables
-gql query \
+gqlcli query \
   --query "query GetUser(\$id: ID!) { user(id: \$id) { id name } }" \
   --variables '{"id":"123"}'
 
 # Variables from file
-gql query \
+gqlcli query \
   --query-file ./queries/getUser.graphql \
   --variables-file ./variables.json
 
 # Named operation (from multi-operation file)
-gql query \
+gqlcli query \
   --query-file ./queries/operations.graphql \
   --operation "GetUser"
 ```
@@ -166,16 +166,16 @@ gql query \
 
 ```bash
 # Basic mutation
-gql mutation \
+gqlcli mutation \
   --mutation "mutation { createUser(name: \"Alice\") { id } }"
 
 # With auto-wrapped input
-gql mutation \
+gqlcli mutation \
   --mutation "mutation CreateUser(\$input: CreateUserInput!) { createUser(input: \$input) { id } }" \
   --input '{"name":"Alice","email":"alice@example.com"}'
 
 # Alternative: explicit variables
-gql mutation \
+gqlcli mutation \
   --mutation-file ./mutations/createUser.graphql \
   --variables '{"input":{"name":"Alice"}}'
 ```
@@ -184,24 +184,24 @@ gql mutation \
 
 ```bash
 # Full schema introspection
-gql introspect --format json-pretty > schema.json
+gqlcli introspect --format json-pretty > schema.json
 
 # LLM-friendly schema
-gql introspect --format llm
+gqlcli introspect --format llm
 
 # List all types
-gql types
+gqlcli types
 
 # Filter types by name
-gql types --filter User
+gqlcli types --filter User
 
 # Filter by kind
-gql types --kind OBJECT
-gql types --kind ENUM
-gql types --kind INPUT_OBJECT
+gqlcli types --kind OBJECT
+gqlcli types --kind ENUM
+gqlcli types --kind INPUT_OBJECT
 
 # Compact output (good for piping)
-gql types -f compact
+gqlcli types -f compact
 ```
 
 ### Environment Configuration
@@ -211,27 +211,27 @@ gql types -f compact
 export GRAPHQL_URL="http://staging-api.example.com/graphql"
 
 # Commands will use staging endpoint
-gql queries
-gql query --query "{ users { id } }"
+gqlcli queries
+gqlcli query --query "{ users { id } }"
 
 # Override with flag
-gql -u http://prod-api.example.com/graphql queries
+gqlcli -u http://prod-api.example.com/graphql queries
 
 # Use default
-gql queries  # Uses GRAPHQL_URL or localhost:8080
+gqlcli queries  # Uses GRAPHQL_URL or localhost:8080
 ```
 
 ### Advanced: Save Results to File
 
 ```bash
 # Query result to file
-gql query --query "{ users { id } }" --output results.json
+gqlcli query --query "{ users { id } }" --output results.json
 
 # Schema to file
-gql introspect --format json --output schema.json
+gqlcli introspect --format json --output schema.json
 
 # Types list to file
-gql types --output types.json
+gqlcli types --output types.json
 ```
 
 ---
@@ -324,7 +324,7 @@ Or clone and build:
 git clone https://github.com/wricardo/gqlcli.git
 cd gqlcli
 make build
-./bin/gql --help
+./bin/gqlcli --help
 ```
 
 ### As a Go Library
@@ -437,11 +437,11 @@ func (c *CachedClient) Execute(ctx context.Context, mode gqlcli.ExecutionMode, o
 ### API Development & Testing
 ```bash
 # Discover available operations
-gql queries
-gql mutations
+gqlcli queries
+gqlcli mutations
 
 # Test a mutation
-gql mutation \
+gqlcli mutation \
   --mutation-file ./test/mutations/createUser.graphql \
   --variables-file ./test/variables.json
 ```
@@ -449,27 +449,27 @@ gql mutation \
 ### Schema Documentation
 ```bash
 # Generate schema documentation
-gql introspect --format llm > SCHEMA.md
+gqlcli introspect --format llm > SCHEMA.md
 
 # List all types
-gql types --format json-pretty > types.json
+gqlcli types --format json-pretty > types.json
 ```
 
 ### CI/CD Pipelines
 ```bash
 # Verify schema changes
-gql introspect --format json > current-schema.json
+gqlcli introspect --format json > current-schema.json
 git diff previous-schema.json current-schema.json
 ```
 
 ### AI/LLM Integration
 ```bash
 # Get schema in token-efficient format
-gql introspect --format toon
+gqlcli introspect --format toon
 
 # Discover operations for LLM context
-gql queries --desc --format toon
-gql mutations --desc --args --format toon
+gqlcli queries --desc --format toon
+gqlcli mutations --desc --args --format toon
 ```
 
 ---
