@@ -12,7 +12,7 @@ func main() {
 	// Create config with default values
 	cfg := &gqlcli.Config{
 		URL:    "http://localhost:8080/graphql",
-		Format: "json",
+		Format: "toon",  // Token-optimized format (40-60% smaller than JSON)
 		Pretty: false,
 		Timeout: 30,
 	}
