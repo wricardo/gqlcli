@@ -22,8 +22,8 @@ func main() {
 
 	// Create CLI app
 	app := &cli.App{
-		Name:    "gql",
-		Usage:   "Simple GraphQL CLI tool",
+		Name:    "gqlcli",
+		Usage:   "Powerful GraphQL CLI tool",
 		Version: "1.0.0",
 		Flags: []cli.Flag{
 			&cli.StringFlag{

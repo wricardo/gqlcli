@@ -2,7 +2,7 @@
 
 # Variables
 APP_NAME := gqlcli
-BINARY_NAME := gql
+BINARY_NAME := gqlcli
 BINARY_PATH := ./bin/$(BINARY_NAME)
 EXAMPLE_PATH := ./example/main.go
 INSTALL_PATH := /usr/local/bin/$(BINARY_NAME)
@@ -25,8 +25,8 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-15s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(GREEN)Examples:$(NC)"
-	@echo "  make install          # Install gql CLI to /usr/local/bin"
-	@echo "  make build            # Build the CLI binary"
+	@echo "  make install          # Install gqlcli using go (to \$$GOPATH/bin or /usr/local/bin)"
+	@echo "  make build            # Build the CLI binary to ./bin/gqlcli"
 	@echo "  make dev              # Build and run locally for testing"
 	@echo "  make test             # Run tests"
 	@echo "  make clean            # Remove build artifacts"
@@ -39,11 +39,25 @@ build: ## Build the CLI binary
 	@$(GO) build $(GOFLAGS) -o $(BINARY_PATH) $(EXAMPLE_PATH)
 	@echo "$(GREEN)✓ Built successfully: $(BINARY_PATH)$(NC)"
 
-install: build ## Install the CLI to /usr/local/bin/gql
-	@echo "$(BLUE)Installing $(BINARY_NAME) to $(INSTALL_PATH)...$(NC)"
-	@cp $(BINARY_PATH) $(INSTALL_PATH)
-	@chmod +x $(INSTALL_PATH)
-	@echo "$(GREEN)✓ Installed successfully to $(INSTALL_PATH)$(NC)"
+install: ## Install the CLI using go install (if available) or to /usr/local/bin
+	@echo "$(BLUE)Installing $(BINARY_NAME)...$(NC)"
+	@if command -v go >/dev/null 2>&1; then \
+		GOBIN=$$($(GO) env GOPATH)/bin; \
+		echo "Using 'go build' and installing to $$GOBIN/$(BINARY_NAME)"; \
+		mkdir -p bin; \
+		$(GO) build $(GOFLAGS) -o bin/$(BINARY_NAME) $(EXAMPLE_PATH); \
+		mkdir -p $$GOBIN; \
+		cp bin/$(BINARY_NAME) $$GOBIN/$(BINARY_NAME); \
+		chmod +x $$GOBIN/$(BINARY_NAME); \
+		echo "$(GREEN)✓ Installed to $$GOBIN/$(BINARY_NAME)$(NC)"; \
+		echo "  Make sure $$GOBIN is in your PATH"; \
+	else \
+		echo "$(YELLOW)Go not found in PATH, using fallback to /usr/local/bin...$(NC)"; \
+		$(MAKE) build; \
+		sudo cp $(BINARY_PATH) $(INSTALL_PATH); \
+		sudo chmod +x $(INSTALL_PATH); \
+		echo "$(GREEN)✓ Installed successfully to $(INSTALL_PATH)$(NC)"; \
+	fi
 	@echo "  Run '$(BINARY_NAME) --help' to get started"
 
 install-local: build ## Install the CLI to ./bin (no sudo required)
