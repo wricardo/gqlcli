@@ -333,7 +333,9 @@ make build
 go get github.com/wricardo/gqlcli
 ```
 
-### Using as a Library
+### Using as a Library (HTTP mode)
+
+Connect to an external GraphQL server over HTTP:
 
 ```go
 package main
@@ -365,6 +367,101 @@ func main() {
 }
 ```
 
+### Inline Execution (no HTTP server required)
+
+If you have a [gqlgen](https://github.com/99designs/gqlgen) schema, you can run operations in-process without a server. This is useful for building a CLI that ships alongside your application binary.
+
+```go
+package main
+
+import (
+	"context"
+	"log"
+	"os"
+
+	"github.com/urfave/cli/v2"
+	gqlcli "github.com/wricardo/gqlcli/pkg"
+
+	"github.com/myorg/myapp/graph" // your gqlgen package
+)
+
+func main() {
+	// 1. Create your gqlgen ExecutableSchema.
+	r := &graph.Resolver{ /* inject DB, services, etc. */ }
+	execSchema := graph.NewExecutableSchema(graph.Config{Resolvers: r})
+
+	// 2. Token store — persists JWT to ~/.myapp/token.
+	tokens := gqlcli.NewTokenStore("myapp")
+
+	// 3. Inline executor — runs operations against the schema directly.
+	//    WithContextEnricher injects auth, dataloaders, etc. before each op.
+	//    WithSchemaHints attaches compact type SDL to validation errors.
+	exec := gqlcli.NewInlineExecutor(execSchema,
+		gqlcli.WithSchemaHints(),
+		gqlcli.WithContextEnricher(func(ctx context.Context) context.Context {
+			if token, err := tokens.Load(); err == nil && token != "" {
+				if claims, err := tokens.ParseClaims(token); err == nil {
+					// inject your app's user context, e.g.:
+					// ctx = auth.SetUserID(ctx, claims.UserID)
+					_ = claims
+				}
+			}
+			return ctx
+		}),
+	)
+
+	// 4. Command set — adds query, mutation, describe, types, login, logout, whoami.
+	commands := gqlcli.NewInlineCommandSet(exec,
+		gqlcli.WithTokenStore(tokens),
+		gqlcli.WithLogin(gqlcli.LoginConfig{
+			Mutation: `mutation Login($email: String!, $password: String!) {
+				login(input: {email: $email, password: $password}) { token }
+			}`,
+			ExtractToken: func(data map[string]interface{}) (string, error) {
+				login, _ := data["login"].(map[string]interface{})
+				token, _ := login["token"].(string)
+				return token, nil
+			},
+			Tokens: tokens,
+		}),
+	)
+
+	// 5. Mount onto any urfave/cli app.
+	app := &cli.App{Name: "myapp", Usage: "CLI for my GraphQL API"}
+	commands.Mount(app)
+
+	if err := app.Run(os.Args); err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+This adds the following subcommands:
+
+| Command | Description |
+|---------|-------------|
+| `query` | Execute a query (TOON format by default) |
+| `mutation` | Execute a mutation (JSON format by default) |
+| `describe TYPE` | Print SDL definition of a type |
+| `types` | List all types in the schema |
+| `login` | Run the login mutation and save the token |
+| `logout` | Clear the saved token |
+| `whoami` | Show info from the saved token |
+
+**Schema hints** — when `WithSchemaHints()` is enabled, validation errors include a compact SDL description of the referenced type:
+
+```
+Error: Cannot query field "titl" on type "Book".
+Schema hint:
+type Book {
+  id: ID!
+  author: String!
+  title: String!
+}
+```
+
+See `example/` for a fully working CLI backed by a gqlgen books API.
+
 ---
 
 ## 🏗️ Architecture
@@ -374,19 +471,26 @@ func main() {
 | Component | Purpose |
 |-----------|---------|
 | **Config** | Configuration holder (URL, format, timeout) |
-| **Client** | GraphQL operation executor (HTTP-based) |
+| **CLIBuilder** | HTTP-based CLI command generator |
+| **InlineExecutor** | In-process executor for gqlgen schemas |
+| **InlineCommandSet** | CLI commands backed by an InlineExecutor |
+| **TokenStore** | JWT persistence at `~/.{appName}/token` |
+| **Describer** | Introspects a schema and returns SDL for a type |
 | **Formatter** | Output format converter (JSON, table, TOON, etc.) |
-| **CLIBuilder** | Command-line interface generator |
 | **FormatterRegistry** | Manages available formatters |
 
 ### Package Structure
 
 ```
 pkg/
-├── cli.go           # CLI command builders
-├── client.go        # HTTP GraphQL client
-├── formatter.go     # Output formatters
-└── types.go         # Type definitions and interfaces
+├── cli.go              # HTTP-based CLI command builders (CLIBuilder)
+├── client.go           # HTTP GraphQL client
+├── inline.go           # InlineExecutor — in-process execution
+├── inline_commands.go  # InlineCommandSet — query/mutation/describe/login commands
+├── token.go            # TokenStore — JWT persistence and parsing
+├── describe.go         # Describer — schema introspection and SDL formatting
+├── formatter.go        # Output formatters
+└── types.go            # Type definitions and interfaces
 ```
 
 ---
@@ -594,6 +698,9 @@ Built with:
 **Active Development** — Maintained and open to contributions.
 
 Latest features:
+- ✅ Inline execution — run operations in-process against a gqlgen schema (no HTTP server)
+- ✅ Schema hints — attach type SDL to GraphQL validation errors
+- ✅ Token store — JWT persistence and parsing for login/logout/whoami
 - ✅ Query and Mutation operation discovery (`queries`, `mutations` commands)
 - ✅ Token-optimized TOON format (default)
 - ✅ Environment variable support (`GRAPHQL_URL`)

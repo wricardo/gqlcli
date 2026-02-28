@@ -1,0 +1,35 @@
+type Query {
+  "Return all books"
+  books: [Book!]!
+
+  "Look up a book by ID"
+  book(id: ID!): Book
+}
+
+type Mutation {
+  "Add a new book"
+  addBook(input: AddBookInput!): Book!
+
+  "Authenticate with email and password"
+  login(input: LoginInput!): LoginPayload!
+}
+
+type Book {
+  id: ID!
+  title: String!
+  author: String!
+}
+
+input AddBookInput {
+  title: String!
+  author: String!
+}
+
+input LoginInput {
+  email: String!
+  password: String!
+}
+
+type LoginPayload {
+  token: String!
+}
