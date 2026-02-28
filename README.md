@@ -4,7 +4,25 @@
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
 [![Go Report Card](https://goreportcard.com/badge/github.com/wricardo/gqlcli)](https://goreportcard.com/report/github.com/wricardo/gqlcli)
 
-A battle-tested, production-ready GraphQL CLI library and tool written in Go. Execute queries, mutations, explore schemas, and list operations against any GraphQL server with flexible output formats, extensible architecture, and zero external dependencies.
+**Build CLIs where GraphQL is the interface language, not subcommands and flags.**
+
+A library for building GraphQL-native CLI applications in Go. Execute queries, mutations, and explore schemas using GraphQL syntax. Especially powerful for AI agents that can naturally construct queries, introspect schemas, and execute complex multi-operation commands.
+
+**The paradigm shift:** Instead of `myapp --flag value --option`, write `myapp query '{ field { nested } }'`
+
+---
+
+## Why GraphQL as a CLI Interface?
+
+| Traditional CLI | GraphQL-Native CLI |
+|---|---|
+| `myapp --user-type=active --limit 10 --format json` | `myapp query '{ users(type: "active", limit: 10) { id name } }'` |
+| Multiple commands for different operations | One unified query language |
+| AI must learn your CLI's custom flags | AI naturally understands GraphQL |
+| Hard to combine operations | Execute multiple queries in parallel |
+| Schema is implicit | **Schema is explicit and queryable** |
+
+**For AI agents:** Schema introspection + GraphQL syntax = powerful, self-service CLI interaction
 
 ---
 
@@ -375,7 +393,6 @@ If you have a [gqlgen](https://github.com/99designs/gqlgen) schema, you can run 
 package main
 
 import (
-	"context"
 	"log"
 	"os"
 
@@ -387,46 +404,19 @@ import (
 
 func main() {
 	// 1. Create your gqlgen ExecutableSchema.
-	r := &graph.Resolver{ /* inject DB, services, etc. */ }
+	r := graph.NewResolver()
 	execSchema := graph.NewExecutableSchema(graph.Config{Resolvers: r})
 
-	// 2. Token store — persists JWT to ~/.myapp/token.
-	tokens := gqlcli.NewTokenStore("myapp")
-
-	// 3. Inline executor — runs operations against the schema directly.
-	//    WithContextEnricher injects auth, dataloaders, etc. before each op.
+	// 2. Inline executor — runs operations directly in-process.
 	//    WithSchemaHints attaches compact type SDL to validation errors.
 	exec := gqlcli.NewInlineExecutor(execSchema,
 		gqlcli.WithSchemaHints(),
-		gqlcli.WithContextEnricher(func(ctx context.Context) context.Context {
-			if token, err := tokens.Load(); err == nil && token != "" {
-				if claims, err := tokens.ParseClaims(token); err == nil {
-					// inject your app's user context, e.g.:
-					// ctx = auth.SetUserID(ctx, claims.UserID)
-					_ = claims
-				}
-			}
-			return ctx
-		}),
 	)
 
-	// 4. Command set — adds query, mutation, describe, types, login, logout, whoami.
-	commands := gqlcli.NewInlineCommandSet(exec,
-		gqlcli.WithTokenStore(tokens),
-		gqlcli.WithLogin(gqlcli.LoginConfig{
-			Mutation: `mutation Login($email: String!, $password: String!) {
-				login(input: {email: $email, password: $password}) { token }
-			}`,
-			ExtractToken: func(data map[string]interface{}) (string, error) {
-				login, _ := data["login"].(map[string]interface{})
-				token, _ := login["token"].(string)
-				return token, nil
-			},
-			Tokens: tokens,
-		}),
-	)
+	// 3. Command set — adds query, mutation, describe, types commands.
+	commands := gqlcli.NewInlineCommandSet(exec)
 
-	// 5. Mount onto any urfave/cli app.
+	// 4. Mount onto any urfave/cli app.
 	app := &cli.App{Name: "myapp", Usage: "CLI for my GraphQL API"}
 	commands.Mount(app)
 
@@ -444,9 +434,6 @@ This adds the following subcommands:
 | `mutation` | Execute a mutation (JSON format by default) |
 | `describe TYPE` | Print SDL definition of a type |
 | `types` | List all types in the schema |
-| `login` | Run the login mutation and save the token |
-| `logout` | Clear the saved token |
-| `whoami` | Show info from the saved token |
 
 **Schema hints** — when `WithSchemaHints()` is enabled, validation errors include a compact SDL description of the referenced type:
 
@@ -455,12 +442,51 @@ Error: Cannot query field "titl" on type "Book".
 Schema hint:
 type Book {
   id: ID!
-  author: String!
   title: String!
+  author: Author!
 }
 ```
 
-See `example/` for a fully working CLI backed by a gqlgen books API.
+### `describe` Command (Inline-Only)
+
+Available only in inline execution mode. Print the SDL definition of a type:
+
+```bash
+# Describe a type
+./myapp describe Query
+./myapp describe Book
+./myapp describe AddBookInput
+
+# Output shows field signatures and relationships
+type Book {
+  id: ID!
+  title: String!
+  author: Author!
+}
+```
+
+Useful for AI agents to discover schema structure before constructing queries.
+
+---
+
+### Complete Example
+
+See [example/README.md](example/README.md) for a complete working example of a **GraphQL-native CLI** — no subcommands, no flags, just GraphQL queries and mutations. The example demonstrates:
+
+- **GraphQL as the interface** — Execute queries like `./myapp query '{ books { id title author { name } } }'`
+- **Schema introspection** — AI agents can discover capabilities with `./myapp describe Book`
+- **Parallel execution** — Multiple top-level queries in one command
+- **Inline execution** — No HTTP server needed, runs in-process against a gqlgen schema
+- **File-based persistence** — Data stored in `store.json`
+- **Forced resolvers** — Using `@goField(forceResolver: true)` for lazy-loading
+- **Split schema files** — Organized with follow-schema layout
+
+This is the ideal paradigm for:
+- **AI agents** — Introspect schema, construct queries, explore data
+- **CLI automation** — Write complex queries instead of chaining commands
+- **Consistent interfaces** — GraphQL works everywhere, agents already understand it
+
+See [example/README.md](example/README.md) for detailed setup and usage.
 
 ---
 
