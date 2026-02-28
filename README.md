@@ -1,32 +1,18 @@
-# gqlcli — Powerful GraphQL CLI & Library
+# gqlcli — GraphQL Client CLI & Library
 
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.20-lightblue)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
 [![Go Report Card](https://goreportcard.com/badge/github.com/wricardo/gqlcli)](https://goreportcard.com/report/github.com/wricardo/gqlcli)
 
-**Build CLIs where GraphQL is the interface language, not subcommands and flags.**
+Two tools in one:
 
-A library for building GraphQL-native CLI applications in Go. Execute queries, mutations, and explore schemas using GraphQL syntax. Especially powerful for AI agents that can naturally construct queries, introspect schemas, and execute complex multi-operation commands.
+1. **`gqlcli` CLI** — A GraphQL client for querying any GraphQL API. Discover fields, execute queries and mutations, explore schemas—all from the command line.
 
-**The paradigm shift:** Instead of `myapp --flag value --option`, write `myapp query '{ field { nested } }'`
-
----
-
-## Why GraphQL as a CLI Interface?
-
-| Traditional CLI | GraphQL-Native CLI |
-|---|---|
-| `myapp --user-type=active --limit 10 --format json` | `myapp query '{ users(type: "active", limit: 10) { id name } }'` |
-| Multiple commands for different operations | One unified query language |
-| AI must learn your CLI's custom flags | AI naturally understands GraphQL |
-| Hard to combine operations | Execute multiple queries in parallel |
-| Schema is implicit | **Schema is explicit and queryable** |
-
-**For AI agents:** Schema introspection + GraphQL syntax = powerful, self-service CLI interaction
+2. **`gqlcli` library** — Build GraphQL-backed CLI applications in Go. Write CLIs where GraphQL is the interface language, not subcommands and flags. Perfect for AI agents that can introspect schemas and construct queries.
 
 ---
 
-## 🚀 Quick Start — See It In Action
+## 🚀 Quick Start — Using the CLI
 
 ### Installation
 
@@ -90,9 +76,9 @@ gqlcli queries --filter user -f compact         # Minimal JSON
 
 ---
 
-## ✨ Features
+## ✨ CLI Features
 
-### 🎯 Powerful Commands
+### 🎯 Commands
 - **`query`** — Execute GraphQL queries with variables and multiple input methods
 - **`mutation`** — Execute mutations with auto-wrapped input objects
 - **`introspect`** — Download and explore full GraphQL schema
@@ -100,35 +86,27 @@ gqlcli queries --filter user -f compact         # Minimal JSON
 - **`queries`** — Discover available Query fields instantly
 - **`mutations`** — Discover available Mutation fields instantly
 
-### 📊 Multiple Output Formats
-- **`json`** — Full JSON (prettified or compact) for programmatic use
-- **`json-pretty`** — Indented JSON for readability
+### 📊 Output Formats
+- **`json` / `json-pretty`** — Pretty or compact JSON
 - **`table`** — Aligned columns for terminal viewing
-- **`compact`** — Minimal JSON output (strips nulls, no whitespace)
-- **`toon`** — Token-optimized format (40-60% smaller than JSON) — **default**
+- **`toon`** — Token-optimized format (40-60% smaller) — **default**
 - **`llm`** — Markdown-friendly for AI/LLM consumption
+- **`compact`** — Minimal JSON (strips nulls)
 
-### 🔐 Flexible Configuration
+### 🔐 Configuration
 - Default endpoint: `http://localhost:8080/graphql`
 - Override via `--url` flag or `GRAPHQL_URL` environment variable
-- Support for bearer token authentication
+- Bearer token authentication support
 - Custom HTTP headers and timeouts
 - Debug mode for request/response logging
 
-### 📝 Multiple Input Methods
-- Inline queries: `--query "query { ... }"`
-- From files: `--query-file query.graphql`
-- As arguments: `query "{ users { id } }"`
+### 📝 Input Methods
+- Inline: `--query "{ users { id } }"`
+- From files: `--query-file queries/getUser.graphql`
+- As arguments: `query "{ ... }"`
 - Variables inline: `--variables '{"id":"123"}'`
 - Variables from files: `--variables-file vars.json`
 - Named operations in multi-operation files
-
-### 🏗️ Extensible Architecture
-- Clean interface-based design
-- Custom formatter support
-- Custom client implementations
-- Reusable as a Go library
-- Zero external binary dependencies (single small binary)
 
 ---
 
@@ -329,9 +307,22 @@ gqlcli types --output types.json
 
 ---
 
-## 📦 Installation (Detailed)
+## 📚 Using as a Library
 
-### As a CLI Tool
+The `gqlcli` package provides two ways to build CLI tools:
+
+| Mode | Use Case |
+|------|----------|
+| **HTTP Mode** | Build a CLI that queries external GraphQL APIs over HTTP |
+| **Inline Mode** | Build a GraphQL-backed CLI with inline execution (using gqlgen) — perfect for AI agents and schema-driven CLIs |
+
+See sections below for detailed examples of each mode.
+
+---
+
+## 📦 Installation
+
+### CLI Tool
 
 ```bash
 go install github.com/wricardo/gqlcli/cmd/gqlcli@latest
@@ -351,9 +342,9 @@ gqlcli --help
 go get github.com/wricardo/gqlcli
 ```
 
-### Using as a Library (HTTP mode)
+### HTTP Mode — Query External GraphQL APIs
 
-Connect to an external GraphQL server over HTTP:
+Build a CLI that connects to external GraphQL servers over HTTP. Useful for API testing, schema exploration, and CI/CD pipelines:
 
 ```go
 package main
@@ -385,9 +376,21 @@ func main() {
 }
 ```
 
-### Inline Execution (no HTTP server required)
+### Inline Mode — GraphQL-Backed CLI Applications
 
-If you have a [gqlgen](https://github.com/99designs/gqlgen) schema, you can run operations in-process without a server. This is useful for building a CLI that ships alongside your application binary.
+Build GraphQL-native CLI applications where GraphQL is the interface language, not subcommands and flags. This is especially powerful for AI agents that can introspect schemas and construct queries dynamically.
+
+**Why GraphQL for CLIs:**
+
+| Traditional CLI | GraphQL-Native CLI |
+|---|---|
+| `myapp --user-type=active --limit 10 --format json` | `myapp query '{ users(type: "active", limit: 10) { id name } }'` |
+| Multiple commands for different operations | One unified query language |
+| AI must learn your CLI's custom flags | AI naturally understands GraphQL |
+| Hard to combine operations | Execute multiple queries in parallel |
+| Schema is implicit | **Schema is explicit and queryable** |
+
+If you have a [gqlgen](https://github.com/99designs/gqlgen) schema, you can run operations in-process without an HTTP server. This is useful for building a CLI that ships alongside your application binary.
 
 ```go
 package main
