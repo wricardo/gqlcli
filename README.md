@@ -31,7 +31,7 @@ A library for building GraphQL-native CLI applications in Go. Execute queries, m
 ### Installation
 
 ```bash
-go install github.com/wricardo/gqlcli/example/main.go@latest
+go install github.com/wricardo/gqlcli/cmd/gqlcli@latest
 # or clone and build
 git clone https://github.com/wricardo/gqlcli.git
 cd gqlcli && make install
@@ -334,15 +334,15 @@ gqlcli types --output types.json
 ### As a CLI Tool
 
 ```bash
-go install github.com/wricardo/gqlcli/cmd/gql@latest
+go install github.com/wricardo/gqlcli/cmd/gqlcli@latest
 ```
 
 Or clone and build:
 ```bash
 git clone https://github.com/wricardo/gqlcli.git
 cd gqlcli
-make build
-./bin/gqlcli --help
+make install
+gqlcli --help
 ```
 
 ### As a Go Library

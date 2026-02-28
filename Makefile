@@ -4,7 +4,7 @@
 APP_NAME := gqlcli
 BINARY_NAME := gqlcli
 BINARY_PATH := ./bin/$(BINARY_NAME)
-EXAMPLE_PATH := ./example/main.go
+CMD_PATH := ./cmd/gqlcli/main.go
 INSTALL_PATH := /usr/local/bin/$(BINARY_NAME)
 
 # Go settings
@@ -36,7 +36,7 @@ help: ## Show this help message
 build: ## Build the CLI binary
 	@echo "$(BLUE)Building $(BINARY_NAME)...$(NC)"
 	@mkdir -p bin
-	@$(GO) build $(GOFLAGS) -o $(BINARY_PATH) $(EXAMPLE_PATH)
+	@$(GO) build $(GOFLAGS) -o $(BINARY_PATH) $(CMD_PATH)
 	@echo "$(GREEN)✓ Built successfully: $(BINARY_PATH)$(NC)"
 
 install: ## Install the CLI using go install (if available) or to /usr/local/bin
@@ -45,7 +45,7 @@ install: ## Install the CLI using go install (if available) or to /usr/local/bin
 		GOBIN=$$($(GO) env GOPATH)/bin; \
 		echo "Using 'go build' and installing to $$GOBIN/$(BINARY_NAME)"; \
 		mkdir -p bin; \
-		$(GO) build $(GOFLAGS) -o bin/$(BINARY_NAME) $(EXAMPLE_PATH); \
+		$(GO) build $(GOFLAGS) -o bin/$(BINARY_NAME) $(CMD_PATH); \
 		mkdir -p $$GOBIN; \
 		cp bin/$(BINARY_NAME) $$GOBIN/$(BINARY_NAME); \
 		chmod +x $$GOBIN/$(BINARY_NAME); \
@@ -162,7 +162,7 @@ info: ## Show project information
 	@echo "  Name: $(APP_NAME)"
 	@echo "  Binary: $(BINARY_NAME)"
 	@echo "  Install Path: $(INSTALL_PATH)"
-	@echo "  Source: $(EXAMPLE_PATH)"
+	@echo "  Source: $(CMD_PATH)"
 	@echo ""
 	@echo "$(GREEN)Dependencies:$(NC)"
 	@$(GO) list -m all | grep -v "$(APP_NAME)" || echo "  None"
