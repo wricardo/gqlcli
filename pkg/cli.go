@@ -3,6 +3,7 @@ package gqlcli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -66,7 +67,7 @@ func (b *CLIBuilder) GetQueryCommand() *cli.Command {
 
 			result, err := b.client.Execute(context.Background(), ExecutionModeHTTP, opts)
 			if err != nil {
-				return err
+				return b.handleError(c, err)
 			}
 
 			// Format and output
@@ -127,7 +128,7 @@ func (b *CLIBuilder) GetMutationCommand() *cli.Command {
 
 			result, err := b.client.ExecuteMutation(context.Background(), ExecutionModeHTTP, opts)
 			if err != nil {
-				return err
+				return b.handleError(c, err)
 			}
 
 			// Format and output
@@ -620,6 +621,19 @@ func (b *CLIBuilder) getVariables(c *cli.Context) (map[string]interface{}, error
 	}
 
 	return nil, nil
+}
+
+// handleError checks whether err is a *GraphQLResponseError and, if so, formats
+// and prints the response using the selected formatter, then returns a silent
+// non-zero exit. For all other errors it returns err unchanged.
+func (b *CLIBuilder) handleError(c *cli.Context, err error) error {
+	var gqlErr *GraphQLResponseError
+	if !errors.As(err, &gqlErr) {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "Query:\n%s\n\n", formatQueryForError(gqlErr.Query))
+	_ = b.outputResult(c, gqlErr.Response)
+	return cli.Exit("", 1)
 }
 
 func (b *CLIBuilder) outputResult(c *cli.Context, result map[string]interface{}) error {

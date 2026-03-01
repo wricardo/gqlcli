@@ -58,6 +58,24 @@ func NewDescriber(exec *InlineExecutor) *Describer {
 	return d
 }
 
+// NewDescriberFromHTTPClient creates a Describer that fetches type information
+// via introspection against the given HTTP client.
+func NewDescriberFromHTTPClient(c *HTTPClient) *Describer {
+	d := &Describer{}
+	d.exec = func(ctx context.Context, query string, vars map[string]interface{}) (json.RawMessage, error) {
+		result, err := c.executeOperation(ctx, query, vars, "")
+		if err != nil {
+			return nil, err
+		}
+		raw, err := json.Marshal(result)
+		if err != nil {
+			return nil, err
+		}
+		return raw, nil
+	}
+	return d
+}
+
 // Describe returns a compact SDL string for the named type with default formatting
 // (no field argument signatures, no descriptions). Results are cached.
 // For custom formatting options use DescribeWith.

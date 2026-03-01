@@ -51,6 +51,10 @@ func NewTableFormatter() *TableFormatter {
 }
 
 func (f *TableFormatter) Format(data map[string]interface{}) (string, error) {
+	if errs, ok := data["errors"].([]interface{}); ok && len(errs) > 0 {
+		return formatErrors(errs), nil
+	}
+
 	var buf strings.Builder
 	w := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
 
@@ -114,6 +118,10 @@ func NewTOONFormatter() *TOONFormatter {
 }
 
 func (f *TOONFormatter) Format(data map[string]interface{}) (string, error) {
+	if errs, ok := data["errors"].([]interface{}); ok && len(errs) > 0 {
+		return formatErrors(errs), nil
+	}
+
 	// Extract data from GraphQL result (skip errors wrapper if present)
 	dataField, ok := data["data"].(map[string]interface{})
 	if !ok || dataField == nil {
@@ -145,17 +153,9 @@ func (f *LLMFormatter) Format(data map[string]interface{}) (string, error) {
 	var buf strings.Builder
 
 	// Check for errors
-	if errors, ok := data["errors"]; ok {
+	if errs, ok := data["errors"].([]interface{}); ok && len(errs) > 0 {
 		fmt.Fprintf(&buf, "## GraphQL Errors\n\n")
-		if errorList, ok := errors.([]interface{}); ok {
-			for i, err := range errorList {
-				if errMap, ok := err.(map[string]interface{}); ok {
-					if msg, ok := errMap["message"].(string); ok {
-						fmt.Fprintf(&buf, "%d. %s\n", i+1, msg)
-					}
-				}
-			}
-		}
+		fmt.Fprint(&buf, formatErrors(errs))
 		return buf.String(), nil
 	}
 
@@ -215,6 +215,44 @@ func (r *DefaultFormatterRegistry) List() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// formatErrors renders GraphQL errors as human-readable text.
+// Used by formatters that are not JSON-based.
+func formatErrors(errors []interface{}) string {
+	var buf strings.Builder
+	for i, e := range errors {
+		em, ok := e.(map[string]interface{})
+		if !ok {
+			fmt.Fprintf(&buf, "Error %d: %v\n", i+1, e)
+			continue
+		}
+
+		msg, _ := em["message"].(string)
+		fmt.Fprintf(&buf, "Error: %s\n", msg)
+
+		if path, ok := em["path"].([]interface{}); ok && len(path) > 0 {
+			var parts []string
+			for _, p := range path {
+				parts = append(parts, fmt.Sprintf("%v", p))
+			}
+			fmt.Fprintf(&buf, "Path: %s\n", strings.Join(parts, "."))
+		}
+
+		if ext, ok := em["extensions"].(map[string]interface{}); ok {
+			if code, ok := ext["code"].(string); ok {
+				fmt.Fprintf(&buf, "Code: %s\n", code)
+			}
+			if hint, ok := ext["schemaHint"].(string); ok {
+				fmt.Fprintf(&buf, "Schema hint:\n%s", hint)
+			}
+		}
+
+		if i < len(errors)-1 {
+			buf.WriteByte('\n')
+		}
+	}
+	return buf.String()
 }
 
 // Helper functions

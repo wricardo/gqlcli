@@ -4,16 +4,44 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
 )
 
+var (
+	reErrOutputField   = regexp.MustCompile(`Cannot query field "[^"]+" on type "([^"]+)"`)
+	reErrInputField    = regexp.MustCompile(`Field "[^"]+" is not defined by type "([^"]+)"`)
+	reErrUnknownArg    = regexp.MustCompile(`Unknown argument "[^"]+" on field "([^.]+)\.[^"]+"`)
+	reErrNeedsSubfield = regexp.MustCompile(`Field "[^"]+" of type "([^"]+)" must have a selection of subfields`)
+)
+
+func extractTypeFromErrorMsg(msg string) string {
+	for _, re := range []*regexp.Regexp{reErrOutputField, reErrInputField, reErrUnknownArg} {
+		if m := re.FindStringSubmatch(msg); len(m) == 2 {
+			return m[1]
+		}
+	}
+	if m := reErrNeedsSubfield.FindStringSubmatch(msg); len(m) == 2 {
+		return strings.Trim(m[1], "[]!")
+	}
+	return ""
+}
+
 // HTTPClient is a GraphQL client that executes operations via HTTP
 type HTTPClient struct {
-	config *Config
-	client *resty.Client
+	config    *Config
+	client    *resty.Client
+	describer *Describer
+}
+
+func (c *HTTPClient) getDescriber() *Describer {
+	if c.describer == nil {
+		c.describer = NewDescriberFromHTTPClient(c)
+	}
+	return c.describer
 }
 
 // NewHTTPClient creates a new HTTP GraphQL client
@@ -182,63 +210,51 @@ func (c *HTTPClient) executeOperation(ctx context.Context, query string, variabl
 		return nil, fmt.Errorf("failed to parse response: %w\nBody: %s", err, string(resp.Body()))
 	}
 
-	// Check for errors in response
-	if errors, ok := result["errors"]; ok {
-		errorMsg := formatGraphQLErrors(errors)
-		queryMsg := fmt.Sprintf("\n\n📝 Query that caused the error:\n%s", formatQueryForError(query))
-		return nil, fmt.Errorf("%s%s", errorMsg, queryMsg)
+	// Check for errors in response; enrich with schema hints and return as typed error.
+	if rawErrors, ok := result["errors"].([]interface{}); ok {
+		c.enrichErrors(ctx, rawErrors)
+		return result, &GraphQLResponseError{Response: result, Query: query}
 	}
 
 	return result, nil
 }
 
-// formatGraphQLErrors formats GraphQL errors for display
-func formatGraphQLErrors(errors interface{}) string {
-	errorList, ok := errors.([]interface{})
-	if !ok {
-		return fmt.Sprintf("%v", errors)
-	}
-
-	var formattedErrors []string
-	for i, err := range errorList {
-		errMap, ok := err.(map[string]interface{})
+// enrichErrors attaches schemaHint to each error's extensions map when the server
+// did not already provide one and the error message references a known type.
+func (c *HTTPClient) enrichErrors(ctx context.Context, errors []interface{}) {
+	for _, e := range errors {
+		em, ok := e.(map[string]interface{})
 		if !ok {
-			formattedErrors = append(formattedErrors, fmt.Sprintf("  %d. %v", i+1, err))
+			continue
+		}
+		msg, _ := em["message"].(string)
+		if msg == "" {
 			continue
 		}
 
-		var parts []string
-
-		// Get the main error message
-		if msg, ok := errMap["message"].(string); ok {
-			parts = append(parts, fmt.Sprintf("  ❌ %d. %s", i+1, msg))
-		} else {
-			parts = append(parts, fmt.Sprintf("  ❌ %d. Unknown error", i+1))
-		}
-
-		// Add field path if available
-		if path, ok := errMap["path"].([]interface{}); ok && len(path) > 0 {
-			var pathStrs []string
-			for _, p := range path {
-				pathStrs = append(pathStrs, fmt.Sprintf("%v", p))
-			}
-			parts = append(parts, fmt.Sprintf("     📂 Path: %s", strings.Join(pathStrs, ".")))
-		}
-
-		// Add extensions if available
-		if extensions, ok := errMap["extensions"].(map[string]interface{}); ok {
-			if code, ok := extensions["code"].(string); ok {
-				parts = append(parts, fmt.Sprintf("     🏷️  Code: %s", code))
-			}
-			if positions, ok := extensions["positions"].([]interface{}); ok && len(positions) > 0 {
-				parts = append(parts, fmt.Sprintf("     📍 Position: %v", positions[0]))
+		// Skip if server already attached a hint.
+		if ext, ok := em["extensions"].(map[string]interface{}); ok {
+			if _, hasHint := ext["schemaHint"]; hasHint {
+				continue
 			}
 		}
 
-		formattedErrors = append(formattedErrors, strings.Join(parts, "\n"))
+		typeName := extractTypeFromErrorMsg(msg)
+		if typeName == "" {
+			continue
+		}
+		hint, err := c.getDescriber().Describe(ctx, typeName)
+		if err != nil || hint == "" {
+			continue
+		}
+
+		ext, ok := em["extensions"].(map[string]interface{})
+		if !ok {
+			ext = make(map[string]interface{})
+			em["extensions"] = ext
+		}
+		ext["schemaHint"] = hint
 	}
-
-	return "\n🚨 GraphQL Validation/Execution Errors:\n" + strings.Join(formattedErrors, "\n\n")
 }
 
 // formatQueryForError formats the query for error display with line numbers

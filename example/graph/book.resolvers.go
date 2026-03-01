@@ -12,29 +12,32 @@ import (
 	"github.com/wricardo/gqlcli/example/graph/model"
 )
 
+// Author is the resolver for the author field.
+func (r *bookResolver) Author(ctx context.Context, obj *model.Book) (*model.Author, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, a := range r.authors {
+		if a.ID == obj.Author.ID {
+			return a, nil
+		}
+	}
+	return obj.Author, nil
+}
+
 // AddBook is the resolver for the addBook field.
 func (r *mutationResolver) AddBook(ctx context.Context, input model.AddBookInput) (*model.Book, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	author := r.getOrCreateAuthor(input.AuthorName)
 	book := &model.Book{
 		ID:     fmt.Sprintf("%d", r.nextID),
 		Title:  input.Title,
-		Author: input.Author,
+		Author: author,
 	}
 	r.nextID++
 	r.books = append(r.books, book)
+	r.save()
 	return book, nil
-}
-
-// Login is the resolver for the login field.
-func (r *mutationResolver) Login(ctx context.Context, input model.LoginInput) (*model.LoginPayload, error) {
-	// Hardcoded credentials for the example — replace with real auth in production.
-	if input.Email == "admin@example.com" && input.Password == "secret" {
-		return &model.LoginPayload{
-			Token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiMSIsImVtYWlsIjoiYWRtaW5AZXhhbXBsZS5jb20ifQ.example",
-		}, nil
-	}
-	return nil, fmt.Errorf("invalid credentials")
 }
 
 // Books is the resolver for the books field.
@@ -58,11 +61,15 @@ func (r *queryResolver) Book(ctx context.Context, id string) (*model.Book, error
 	return nil, nil
 }
 
+// Book returns BookResolver implementation.
+func (r *Resolver) Book() BookResolver { return &bookResolver{r} }
+
 // Mutation returns MutationResolver implementation.
 func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
+type bookResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }

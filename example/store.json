@@ -1,0 +1,19 @@
+{
+  "books": [
+    {
+      "id": "1",
+      "title": "Clean Code",
+      "author": {
+        "id": "a1",
+        "name": "Robert C. Martin"
+      }
+    }
+  ],
+  "authors": [
+    {
+      "id": "a1",
+      "name": "Robert C. Martin"
+    }
+  ],
+  "nextId": 2
+}

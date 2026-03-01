@@ -28,6 +28,7 @@ func NewExecutableSchema(cfg Config) graphql.ExecutableSchema {
 type Config = graphql.Config[ResolverRoot, DirectiveRoot, ComplexityRoot]
 
 type ResolverRoot interface {
+	Book() BookResolver
 	Mutation() MutationResolver
 	Query() QueryResolver
 }
@@ -36,19 +37,19 @@ type DirectiveRoot struct {
 }
 
 type ComplexityRoot struct {
+	Author struct {
+		ID   func(childComplexity int) int
+		Name func(childComplexity int) int
+	}
+
 	Book struct {
 		Author func(childComplexity int) int
 		ID     func(childComplexity int) int
 		Title  func(childComplexity int) int
 	}
 
-	LoginPayload struct {
-		Token func(childComplexity int) int
-	}
-
 	Mutation struct {
 		AddBook func(childComplexity int, input model.AddBookInput) int
-		Login   func(childComplexity int, input model.LoginInput) int
 	}
 
 	Query struct {
@@ -57,9 +58,11 @@ type ComplexityRoot struct {
 	}
 }
 
+type BookResolver interface {
+	Author(ctx context.Context, obj *model.Book) (*model.Author, error)
+}
 type MutationResolver interface {
 	AddBook(ctx context.Context, input model.AddBookInput) (*model.Book, error)
-	Login(ctx context.Context, input model.LoginInput) (*model.LoginPayload, error)
 }
 type QueryResolver interface {
 	Books(ctx context.Context) ([]*model.Book, error)
@@ -80,6 +83,19 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 	_ = ec
 	switch typeName + "." + field {
 
+	case "Author.id":
+		if e.ComplexityRoot.Author.ID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Author.ID(childComplexity), true
+	case "Author.name":
+		if e.ComplexityRoot.Author.Name == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Author.Name(childComplexity), true
+
 	case "Book.author":
 		if e.ComplexityRoot.Book.Author == nil {
 			break
@@ -99,13 +115,6 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.Book.Title(childComplexity), true
 
-	case "LoginPayload.token":
-		if e.ComplexityRoot.LoginPayload.Token == nil {
-			break
-		}
-
-		return e.ComplexityRoot.LoginPayload.Token(childComplexity), true
-
 	case "Mutation.addBook":
 		if e.ComplexityRoot.Mutation.AddBook == nil {
 			break
@@ -117,17 +126,6 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Mutation.AddBook(childComplexity, args["input"].(model.AddBookInput)), true
-	case "Mutation.login":
-		if e.ComplexityRoot.Mutation.Login == nil {
-			break
-		}
-
-		args, err := ec.field_Mutation_login_args(ctx, rawArgs)
-		if err != nil {
-			return 0, false
-		}
-
-		return e.ComplexityRoot.Mutation.Login(childComplexity, args["input"].(model.LoginInput)), true
 
 	case "Query.book":
 		if e.ComplexityRoot.Query.Book == nil {
@@ -156,7 +154,6 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 	ec := newExecutionContext(opCtx, e, make(chan graphql.DeferredResult))
 	inputUnmarshalMap := graphql.BuildUnmarshalerMap(
 		ec.unmarshalInputAddBookInput,
-		ec.unmarshalInputLoginInput,
 	)
 	first := true
 
@@ -231,7 +228,7 @@ func newExecutionContext(
 	}
 }
 
-//go:embed "schema.graphqls"
+//go:embed "author.graphqls" "book.graphqls"
 var sourcesFS embed.FS
 
 func sourceData(filename string) string {
@@ -243,7 +240,8 @@ func sourceData(filename string) string {
 }
 
 var sources = []*ast.Source{
-	{Name: "schema.graphqls", Input: sourceData("schema.graphqls"), BuiltIn: false},
+	{Name: "author.graphqls", Input: sourceData("author.graphqls"), BuiltIn: false},
+	{Name: "book.graphqls", Input: sourceData("book.graphqls"), BuiltIn: false},
 }
 var parsedSchema = gqlparser.MustLoadSchema(sources...)
 
@@ -255,17 +253,6 @@ func (ec *executionContext) field_Mutation_addBook_args(ctx context.Context, raw
 	var err error
 	args := map[string]any{}
 	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNAddBookInput2githubᚗcomᚋwricardoᚋgqlcliᚋexampleᚋgraphᚋmodelᚐAddBookInput)
-	if err != nil {
-		return nil, err
-	}
-	args["input"] = arg0
-	return args, nil
-}
-
-func (ec *executionContext) field_Mutation_login_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
-	var err error
-	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNLoginInput2githubᚗcomᚋwricardoᚋgqlcliᚋexampleᚋgraphᚋmodelᚐLoginInput)
 	if err != nil {
 		return nil, err
 	}
@@ -347,6 +334,64 @@ func (ec *executionContext) field___Type_fields_args(ctx context.Context, rawArg
 
 // region    **************************** field.gotpl *****************************
 
+func (ec *executionContext) _Author_id(ctx context.Context, field graphql.CollectedField, obj *model.Author) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Author_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNID2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Author_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Author",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ID does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Author_name(ctx context.Context, field graphql.CollectedField, obj *model.Author) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Author_name,
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Author_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Author",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Book_id(ctx context.Context, field graphql.CollectedField, obj *model.Book) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -412,10 +457,10 @@ func (ec *executionContext) _Book_author(ctx context.Context, field graphql.Coll
 		field,
 		ec.fieldContext_Book_author,
 		func(ctx context.Context) (any, error) {
-			return obj.Author, nil
+			return ec.Resolvers.Book().Author(ctx, obj)
 		},
 		nil,
-		ec.marshalNString2string,
+		ec.marshalNAuthor2ᚖgithubᚗcomᚋwricardoᚋgqlcliᚋexampleᚋgraphᚋmodelᚐAuthor,
 		true,
 		true,
 	)
@@ -425,39 +470,16 @@ func (ec *executionContext) fieldContext_Book_author(_ context.Context, field gr
 	fc = &graphql.FieldContext{
 		Object:     "Book",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type String does not have child fields")
-		},
-	}
-	return fc, nil
-}
-
-func (ec *executionContext) _LoginPayload_token(ctx context.Context, field graphql.CollectedField, obj *model.LoginPayload) (ret graphql.Marshaler) {
-	return graphql.ResolveField(
-		ctx,
-		ec.OperationContext,
-		field,
-		ec.fieldContext_LoginPayload_token,
-		func(ctx context.Context) (any, error) {
-			return obj.Token, nil
-		},
-		nil,
-		ec.marshalNString2string,
-		true,
-		true,
-	)
-}
-
-func (ec *executionContext) fieldContext_LoginPayload_token(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	fc = &graphql.FieldContext{
-		Object:     "LoginPayload",
-		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
-		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type String does not have child fields")
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Author_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Author_name(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Author", field.Name)
 		},
 	}
 	return fc, nil
@@ -506,51 +528,6 @@ func (ec *executionContext) fieldContext_Mutation_addBook(ctx context.Context, f
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_addBook_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
-		ec.Error(ctx, err)
-		return fc, err
-	}
-	return fc, nil
-}
-
-func (ec *executionContext) _Mutation_login(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
-	return graphql.ResolveField(
-		ctx,
-		ec.OperationContext,
-		field,
-		ec.fieldContext_Mutation_login,
-		func(ctx context.Context) (any, error) {
-			fc := graphql.GetFieldContext(ctx)
-			return ec.Resolvers.Mutation().Login(ctx, fc.Args["input"].(model.LoginInput))
-		},
-		nil,
-		ec.marshalNLoginPayload2ᚖgithubᚗcomᚋwricardoᚋgqlcliᚋexampleᚋgraphᚋmodelᚐLoginPayload,
-		true,
-		true,
-	)
-}
-
-func (ec *executionContext) fieldContext_Mutation_login(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	fc = &graphql.FieldContext{
-		Object:     "Mutation",
-		Field:      field,
-		IsMethod:   true,
-		IsResolver: true,
-		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			switch field.Name {
-			case "token":
-				return ec.fieldContext_LoginPayload_token(ctx, field)
-			}
-			return nil, fmt.Errorf("no field named %q was found under type LoginPayload", field.Name)
-		},
-	}
-	defer func() {
-		if r := recover(); r != nil {
-			err = ec.Recover(ctx, r)
-			ec.Error(ctx, err)
-		}
-	}()
-	ctx = graphql.WithFieldContext(ctx, fc)
-	if fc.Args, err = ec.field_Mutation_login_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -2204,7 +2181,7 @@ func (ec *executionContext) unmarshalInputAddBookInput(ctx context.Context, obj 
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"title", "author"}
+	fieldsInOrder := [...]string{"title", "authorName"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -2218,46 +2195,13 @@ func (ec *executionContext) unmarshalInputAddBookInput(ctx context.Context, obj 
 				return it, err
 			}
 			it.Title = data
-		case "author":
-			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("author"))
+		case "authorName":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("authorName"))
 			data, err := ec.unmarshalNString2string(ctx, v)
 			if err != nil {
 				return it, err
 			}
-			it.Author = data
-		}
-	}
-	return it, nil
-}
-
-func (ec *executionContext) unmarshalInputLoginInput(ctx context.Context, obj any) (model.LoginInput, error) {
-	var it model.LoginInput
-	asMap := map[string]any{}
-	for k, v := range obj.(map[string]any) {
-		asMap[k] = v
-	}
-
-	fieldsInOrder := [...]string{"email", "password"}
-	for _, k := range fieldsInOrder {
-		v, ok := asMap[k]
-		if !ok {
-			continue
-		}
-		switch k {
-		case "email":
-			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("email"))
-			data, err := ec.unmarshalNString2string(ctx, v)
-			if err != nil {
-				return it, err
-			}
-			it.Email = data
-		case "password":
-			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("password"))
-			data, err := ec.unmarshalNString2string(ctx, v)
-			if err != nil {
-				return it, err
-			}
-			it.Password = data
+			it.AuthorName = data
 		}
 	}
 	return it, nil
@@ -2271,29 +2215,24 @@ func (ec *executionContext) unmarshalInputLoginInput(ctx context.Context, obj an
 
 // region    **************************** object.gotpl ****************************
 
-var bookImplementors = []string{"Book"}
+var authorImplementors = []string{"Author"}
 
-func (ec *executionContext) _Book(ctx context.Context, sel ast.SelectionSet, obj *model.Book) graphql.Marshaler {
-	fields := graphql.CollectFields(ec.OperationContext, sel, bookImplementors)
+func (ec *executionContext) _Author(ctx context.Context, sel ast.SelectionSet, obj *model.Author) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, authorImplementors)
 
 	out := graphql.NewFieldSet(fields)
 	deferred := make(map[string]*graphql.FieldSet)
 	for i, field := range fields {
 		switch field.Name {
 		case "__typename":
-			out.Values[i] = graphql.MarshalString("Book")
+			out.Values[i] = graphql.MarshalString("Author")
 		case "id":
-			out.Values[i] = ec._Book_id(ctx, field, obj)
+			out.Values[i] = ec._Author_id(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
-		case "title":
-			out.Values[i] = ec._Book_title(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
-			}
-		case "author":
-			out.Values[i] = ec._Book_author(ctx, field, obj)
+		case "name":
+			out.Values[i] = ec._Author_name(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
@@ -2320,22 +2259,63 @@ func (ec *executionContext) _Book(ctx context.Context, sel ast.SelectionSet, obj
 	return out
 }
 
-var loginPayloadImplementors = []string{"LoginPayload"}
+var bookImplementors = []string{"Book"}
 
-func (ec *executionContext) _LoginPayload(ctx context.Context, sel ast.SelectionSet, obj *model.LoginPayload) graphql.Marshaler {
-	fields := graphql.CollectFields(ec.OperationContext, sel, loginPayloadImplementors)
+func (ec *executionContext) _Book(ctx context.Context, sel ast.SelectionSet, obj *model.Book) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, bookImplementors)
 
 	out := graphql.NewFieldSet(fields)
 	deferred := make(map[string]*graphql.FieldSet)
 	for i, field := range fields {
 		switch field.Name {
 		case "__typename":
-			out.Values[i] = graphql.MarshalString("LoginPayload")
-		case "token":
-			out.Values[i] = ec._LoginPayload_token(ctx, field, obj)
+			out.Values[i] = graphql.MarshalString("Book")
+		case "id":
+			out.Values[i] = ec._Book_id(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "title":
+			out.Values[i] = ec._Book_title(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "author":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Book_author(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -2381,13 +2361,6 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "addBook":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_addBook(ctx, field)
-			})
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
-			}
-		case "login":
-			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
-				return ec._Mutation_login(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
@@ -2846,6 +2819,20 @@ func (ec *executionContext) unmarshalNAddBookInput2githubᚗcomᚋwricardoᚋgql
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 
+func (ec *executionContext) marshalNAuthor2githubᚗcomᚋwricardoᚋgqlcliᚋexampleᚋgraphᚋmodelᚐAuthor(ctx context.Context, sel ast.SelectionSet, v model.Author) graphql.Marshaler {
+	return ec._Author(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNAuthor2ᚖgithubᚗcomᚋwricardoᚋgqlcliᚋexampleᚋgraphᚋmodelᚐAuthor(ctx context.Context, sel ast.SelectionSet, v *model.Author) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._Author(ctx, sel, v)
+}
+
 func (ec *executionContext) marshalNBook2githubᚗcomᚋwricardoᚋgqlcliᚋexampleᚋgraphᚋmodelᚐBook(ctx context.Context, sel ast.SelectionSet, v model.Book) graphql.Marshaler {
 	return ec._Book(ctx, sel, &v)
 }
@@ -2906,25 +2893,6 @@ func (ec *executionContext) marshalNID2string(ctx context.Context, sel ast.Selec
 		}
 	}
 	return res
-}
-
-func (ec *executionContext) unmarshalNLoginInput2githubᚗcomᚋwricardoᚋgqlcliᚋexampleᚋgraphᚋmodelᚐLoginInput(ctx context.Context, v any) (model.LoginInput, error) {
-	res, err := ec.unmarshalInputLoginInput(ctx, v)
-	return res, graphql.ErrorOnPath(ctx, err)
-}
-
-func (ec *executionContext) marshalNLoginPayload2githubᚗcomᚋwricardoᚋgqlcliᚋexampleᚋgraphᚋmodelᚐLoginPayload(ctx context.Context, sel ast.SelectionSet, v model.LoginPayload) graphql.Marshaler {
-	return ec._LoginPayload(ctx, sel, &v)
-}
-
-func (ec *executionContext) marshalNLoginPayload2ᚖgithubᚗcomᚋwricardoᚋgqlcliᚋexampleᚋgraphᚋmodelᚐLoginPayload(ctx context.Context, sel ast.SelectionSet, v *model.LoginPayload) graphql.Marshaler {
-	if v == nil {
-		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
-		}
-		return graphql.Null
-	}
-	return ec._LoginPayload(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalNString2string(ctx context.Context, v any) (string, error) {

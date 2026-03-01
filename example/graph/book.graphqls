@@ -1,3 +1,5 @@
+directive @goField(forceResolver: Boolean) on FIELD_DEFINITION
+
 type Query {
   "Return all books"
   books: [Book!]!
@@ -9,27 +11,15 @@ type Query {
 type Mutation {
   "Add a new book"
   addBook(input: AddBookInput!): Book!
-
-  "Authenticate with email and password"
-  login(input: LoginInput!): LoginPayload!
 }
 
 type Book {
   id: ID!
   title: String!
-  author: String!
+  author: Author! @goField(forceResolver: true)
 }
 
 input AddBookInput {
   title: String!
-  author: String!
-}
-
-input LoginInput {
-  email: String!
-  password: String!
-}
-
-type LoginPayload {
-  token: String!
+  authorName: String!
 }

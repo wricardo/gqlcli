@@ -3,23 +3,19 @@
 package model
 
 type AddBookInput struct {
-	Title  string `json:"title"`
-	Author string `json:"author"`
+	Title      string `json:"title"`
+	AuthorName string `json:"authorName"`
+}
+
+type Author struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type Book struct {
-	ID     string `json:"id"`
-	Title  string `json:"title"`
-	Author string `json:"author"`
-}
-
-type LoginInput struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
-
-type LoginPayload struct {
-	Token string `json:"token"`
+	ID     string  `json:"id"`
+	Title  string  `json:"title"`
+	Author *Author `json:"author"`
 }
 
 type Mutation struct {

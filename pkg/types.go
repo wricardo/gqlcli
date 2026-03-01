@@ -59,6 +59,15 @@ type GraphQLError struct {
 	Extensions map[string]interface{} `json:"extensions,omitempty"`
 }
 
+// GraphQLResponseError is returned by Execute when the server responds with GraphQL errors.
+// The Response field holds the full response map with errors enriched with schema hints.
+type GraphQLResponseError struct {
+	Response map[string]interface{}
+	Query    string
+}
+
+func (e *GraphQLResponseError) Error() string { return "GraphQL errors in response" }
+
 // ExecutionMode determines how the query is executed
 type ExecutionMode int
 
