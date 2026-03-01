@@ -41,6 +41,7 @@ func (b *CLIBuilder) GetQueryCommand() *cli.Command {
 		Flags: b.getOperationFlags(),
 		Action: func(c *cli.Context) error {
 			// Update config with command-line flags
+			b.config.URL = c.String("url")
 			b.config.Debug = c.Bool("debug")
 			b.client = NewHTTPClient(b.config)
 
@@ -92,6 +93,7 @@ func (b *CLIBuilder) GetMutationCommand() *cli.Command {
 		),
 		Action: func(c *cli.Context) error {
 			// Update config with command-line flags
+			b.config.URL = c.String("url")
 			b.config.Debug = c.Bool("debug")
 			b.client = NewHTTPClient(b.config)
 
@@ -147,8 +149,9 @@ func (b *CLIBuilder) GetIntrospectCommand() *cli.Command {
 			&cli.StringFlag{
 				Name:    "url",
 				Aliases: []string{"u"},
-				Usage:   "GraphQL endpoint URL",
+				Usage:   "GraphQL endpoint URL (env: GRAPHQL_URL)",
 				Value:   b.config.URL,
+				EnvVars: []string{"GRAPHQL_URL"},
 			},
 			&cli.BoolFlag{
 				Name:    "debug",
@@ -176,6 +179,7 @@ func (b *CLIBuilder) GetIntrospectCommand() *cli.Command {
 		},
 		Action: func(c *cli.Context) error {
 			// Update config with command-line flags
+			b.config.URL = c.String("url")
 			b.config.Debug = c.Bool("debug")
 			b.client = NewHTTPClient(b.config)
 
@@ -223,8 +227,9 @@ func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 			&cli.StringFlag{
 				Name:    "url",
 				Aliases: []string{"u"},
-				Usage:   "GraphQL endpoint URL",
+				Usage:   "GraphQL endpoint URL (env: GRAPHQL_URL)",
 				Value:   b.config.URL,
+				EnvVars: []string{"GRAPHQL_URL"},
 			},
 			&cli.BoolFlag{
 				Name:    "debug",
@@ -250,6 +255,7 @@ func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 		},
 		Action: func(c *cli.Context) error {
 			// Update config with command-line flags
+			b.config.URL = c.String("url")
 			b.config.Debug = c.Bool("debug")
 			b.client = NewHTTPClient(b.config)
 
@@ -306,8 +312,9 @@ func (b *CLIBuilder) GetQueriesCommand() *cli.Command {
 			&cli.StringFlag{
 				Name:    "url",
 				Aliases: []string{"u"},
-				Usage:   "GraphQL endpoint URL",
+				Usage:   "GraphQL endpoint URL (env: GRAPHQL_URL)",
 				Value:   b.config.URL,
+				EnvVars: []string{"GRAPHQL_URL"},
 			},
 			&cli.BoolFlag{
 				Name:    "debug",
@@ -336,6 +343,7 @@ func (b *CLIBuilder) GetQueriesCommand() *cli.Command {
 		},
 		Action: func(c *cli.Context) error {
 			// Update config with command-line flags
+			b.config.URL = c.String("url")
 			b.config.Debug = c.Bool("debug")
 			b.client = NewHTTPClient(b.config)
 
@@ -391,8 +399,9 @@ func (b *CLIBuilder) GetMutationsCommand() *cli.Command {
 			&cli.StringFlag{
 				Name:    "url",
 				Aliases: []string{"u"},
-				Usage:   "GraphQL endpoint URL",
+				Usage:   "GraphQL endpoint URL (env: GRAPHQL_URL)",
 				Value:   b.config.URL,
+				EnvVars: []string{"GRAPHQL_URL"},
 			},
 			&cli.BoolFlag{
 				Name:    "debug",
@@ -421,6 +430,7 @@ func (b *CLIBuilder) GetMutationsCommand() *cli.Command {
 		},
 		Action: func(c *cli.Context) error {
 			// Update config with command-line flags
+			b.config.URL = c.String("url")
 			b.config.Debug = c.Bool("debug")
 			b.client = NewHTTPClient(b.config)
 
@@ -472,6 +482,7 @@ func (b *CLIBuilder) RegisterCommands(app *cli.App) {
 		b.GetTypesCommand(),
 		b.GetQueriesCommand(),
 		b.GetMutationsCommand(),
+		b.GetInstallSkillCommand(),
 	)
 }
 
