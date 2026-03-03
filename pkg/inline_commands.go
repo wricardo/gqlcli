@@ -114,7 +114,7 @@ func (cs *InlineCommandSet) mutationCommand() *cli.Command {
 		Name:    "mutation",
 		Aliases: []string{"m"},
 		Usage:   "Execute a GraphQL mutation",
-		Flags:   inlineOperationFlags("json"),
+		Flags:   inlineOperationFlags("toon"),
 		Action: func(c *cli.Context) error {
 			op, vars, err := readInlineOperation(c)
 			if err != nil {

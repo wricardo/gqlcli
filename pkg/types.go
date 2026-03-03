@@ -5,7 +5,7 @@ import "context"
 // Config holds the CLI configuration
 type Config struct {
 	URL    string // GraphQL endpoint URL (default: http://localhost:8080/graphql)
-	Format string // Output format: json, table, compact, toon, llm (default: json)
+	Format string // Output format: json, table, compact, toon, llm (default: toon)
 	Pretty bool   // Pretty-print JSON output
 
 	// Authentication

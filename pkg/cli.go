@@ -163,8 +163,8 @@ func (b *CLIBuilder) GetIntrospectCommand() *cli.Command {
 			&cli.StringFlag{
 				Name:    "format",
 				Aliases: []string{"f"},
-				Usage:   "Output format: llm (default), json, compact",
-				Value:   "llm",
+				Usage:   "Output format: toon (default), json, llm, compact",
+				Value:   "toon",
 			},
 			&cli.StringFlag{
 				Name:    "output",
@@ -217,6 +217,57 @@ func (b *CLIBuilder) GetIntrospectCommand() *cli.Command {
 	}
 }
 
+// GetDescribeCommand returns the describe command
+func (b *CLIBuilder) GetDescribeCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "describe",
+		Aliases:   []string{"d"},
+		Usage:     "Show the SDL definition of a GraphQL type",
+		ArgsUsage: "TYPE_NAME",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:    "url",
+				Aliases: []string{"u"},
+				Usage:   "GraphQL endpoint URL (env: GRAPHQL_URL)",
+				Value:   b.config.URL,
+				EnvVars: []string{"GRAPHQL_URL"},
+			},
+			&cli.BoolFlag{
+				Name:    "debug",
+				Aliases: []string{"d"},
+				Usage:   "Enable debug mode (logs HTTP requests/responses)",
+				Value:   b.config.Debug,
+			},
+			&cli.BoolFlag{
+				Name:    "args",
+				Aliases: []string{"a"},
+				Usage:   "Expand field argument signatures",
+			},
+			&cli.BoolFlag{
+				Name:  "descriptions",
+				Usage: "Include field/type descriptions",
+			},
+		},
+		Action: func(c *cli.Context) error {
+			b.config.URL = c.String("url")
+			b.config.Debug = c.Bool("debug")
+			httpClient := NewHTTPClient(b.config)
+
+			if c.NArg() == 0 {
+				return fmt.Errorf("TYPE_NAME argument is required")
+			}
+			typeName := c.Args().First()
+			d := NewDescriberFromHTTPClient(httpClient)
+			hint, err := d.DescribeWith(context.Background(), typeName, c.Bool("args"), c.Bool("descriptions"))
+			if err != nil {
+				return err
+			}
+			fmt.Print(hint)
+			return nil
+		},
+	}
+}
+
 // GetTypesCommand returns the types listing command
 func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 	return &cli.Command{
@@ -250,8 +301,8 @@ func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 			&cli.StringFlag{
 				Name:    "format",
 				Aliases: []string{"f"},
-				Usage:   "Output format: compact (default), json, table",
-				Value:   "compact",
+				Usage:   "Output format: toon (default), json, table, compact",
+				Value:   "toon",
 			},
 		},
 		Action: func(c *cli.Context) error {
@@ -279,6 +330,24 @@ func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 			typesList, ok := schema["types"].([]interface{})
 			if !ok {
 				return fmt.Errorf("invalid types in schema")
+			}
+
+			// Apply filter if provided
+			if filter := c.String("filter"); filter != "" {
+				typesList = filterOperations(typesList, filter)
+			}
+
+			// Apply kind filter if provided
+			if kind := c.String("kind"); kind != "" {
+				var filtered []interface{}
+				for _, t := range typesList {
+					if tm, ok := t.(map[string]interface{}); ok {
+						if k, _ := tm["kind"].(string); strings.EqualFold(k, kind) {
+							filtered = append(filtered, t)
+						}
+					}
+				}
+				typesList = filtered
 			}
 
 			// Format and output
@@ -481,6 +550,7 @@ func (b *CLIBuilder) RegisterCommands(app *cli.App) {
 		b.GetMutationCommand(),
 		b.GetIntrospectCommand(),
 		b.GetTypesCommand(),
+		b.GetDescribeCommand(),
 		b.GetQueriesCommand(),
 		b.GetMutationsCommand(),
 		b.GetInstallSkillCommand(),

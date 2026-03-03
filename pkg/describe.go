@@ -179,8 +179,42 @@ func FormatTypeSDL(typeData map[string]interface{}, showArgs, noDescriptions boo
 
 	printFields := func(fields []interface{}) {
 		sorted := sortFieldsByType(fields)
-		for _, fm := range sorted {
-			b.WriteString(formatSDLField(fm, showArgs))
+		i := 0
+		for i < len(sorted) {
+			fm := sorted[i]
+			ftype := formatTypeRef(fm["type"])
+			fmArgs, _ := fm["args"].([]interface{})
+
+			// Fields with args always get their own line
+			if showArgs && len(fmArgs) > 0 {
+				b.WriteString(formatSDLField(fm, showArgs))
+				i++
+				continue
+			}
+
+			// Collect consecutive fields with the same type
+			group := []map[string]interface{}{fm}
+			j := i + 1
+			for j < len(sorted) {
+				next := sorted[j]
+				nextArgs, _ := next["args"].([]interface{})
+				if formatTypeRef(next["type"]) != ftype || (showArgs && len(nextArgs) > 0) {
+					break
+				}
+				group = append(group, next)
+				j++
+			}
+
+			if len(group) == 1 {
+				b.WriteString(formatSDLField(fm, showArgs))
+			} else {
+				names := make([]string, len(group))
+				for k, g := range group {
+					names[k], _ = g["name"].(string)
+				}
+				fmt.Fprintf(&b, "  %s: %s\n", strings.Join(names, ", "), ftype)
+			}
+			i = j
 		}
 	}
 
