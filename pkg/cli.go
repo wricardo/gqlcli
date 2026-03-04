@@ -73,9 +73,14 @@ func (b *CLIBuilder) GetQueryCommand() *cli.Command {
 		Name:    "query",
 		Aliases: []string{"q"},
 		Usage:   "Execute a GraphQL query",
-		Description: "Execute a read-only GraphQL query against the endpoint. " +
-			"Query can come from --query flag, --query-file, or as the first argument. " +
-			"Variables can be provided via --variables (inline JSON) or --variables-file.",
+		Description: "Execute a read-only GraphQL query against the endpoint.\n\n" +
+			"Query source (pick one): --query flag, --query-file, or first positional argument.\n" +
+			"Variables: --variables '{\"id\":\"123\"}' (inline JSON) or --variables-file vars.json.\n\n" +
+			"Use --format llm for LLM-friendly output; --format json when parsing programmatically.\n\n" +
+			"Examples:\n" +
+			"  gqlcli query '{ users { id name } }'\n" +
+			"  gqlcli query '{ user(id:$id) { name } }' --variables '{\"id\":\"42\"}'\n" +
+			"  gqlcli query --query-file myquery.graphql --format llm",
 		Flags: b.getOperationFlags(),
 		Action: func(c *cli.Context) error {
 			if err := b.applyEnvConfig(c); err != nil {
@@ -119,10 +124,15 @@ func (b *CLIBuilder) GetMutationCommand() *cli.Command {
 		Name:    "mutation",
 		Aliases: []string{"m"},
 		Usage:   "Execute a GraphQL mutation",
-		Description: "Execute a write operation (mutation) against the endpoint. " +
-			"Mutation can come from --mutation flag, --mutation-file, or as the first argument. " +
-			"Variables can be provided via --variables or --variables-file. " +
-			"Use --input to auto-wrap input as {\"input\": {...}}.",
+		Description: "Execute a write operation (mutation) against the endpoint.\n\n" +
+			"Mutation source (pick one): --mutation flag, --mutation-file, or first positional argument.\n" +
+			"Variables: --variables '{\"id\":\"123\"}' or --variables-file vars.json.\n" +
+			"--input shortcut: pass the input object directly; it is automatically wrapped as {\"input\":{...}}.\n\n" +
+			"Examples:\n" +
+			"  gqlcli mutation 'mutation { deleteUser(id:\"1\") { ok } }'\n" +
+			"  gqlcli mutation 'mutation CreateUser($input: CreateUserInput!) { createUser(input: $input) { id } }' \\\n" +
+			"    --input '{\"name\":\"Alice\",\"email\":\"alice@example.com\"}'\n" +
+			"  gqlcli mutation --mutation-file create_user.graphql --variables-file vars.json",
 		Flags: append(b.getOperationFlags(),
 			&cli.StringFlag{
 				Name:  "input",
@@ -174,97 +184,14 @@ func (b *CLIBuilder) GetMutationCommand() *cli.Command {
 	}
 }
 
-// GetIntrospectCommand returns the introspection command
-func (b *CLIBuilder) GetIntrospectCommand() *cli.Command {
-	return &cli.Command{
-		Name:    "introspect",
-		Aliases: []string{"schema"},
-		Usage:   "Generate GraphQL schema",
-		Description: "Output the GraphQL schema in various formats. " +
-			"Default format is 'llm' (human and LLM-friendly). " +
-			"Use 'json' for full introspection data, or 'compact' for minimal output.",
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:    "url",
-				Aliases: []string{"u"},
-				Usage:   "GraphQL endpoint URL (env: GRAPHQL_URL)",
-				Value:   b.config.URL,
-				EnvVars: []string{"GRAPHQL_URL"},
-			},
-			&cli.BoolFlag{
-				Name:    "debug",
-				Aliases: []string{"d"},
-				Usage:   "Enable debug mode (logs HTTP requests/responses)",
-				Value:   b.config.Debug,
-			},
-			&cli.StringFlag{
-				Name:    "format",
-				Aliases: []string{"f"},
-				Usage:   "Output format: toon (default), json, llm, compact",
-				Value:   "toon",
-			},
-			&cli.StringFlag{
-				Name:    "output",
-				Aliases: []string{"o"},
-				Usage:   "Output file path (default: stdout)",
-			},
-			&cli.BoolFlag{
-				Name:    "pretty",
-				Aliases: []string{"p"},
-				Usage:   "Pretty print JSON output (only for json format)",
-				Value:   false,
-			},
-			&cli.StringFlag{
-				Name:  "env",
-				Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
-			},
-		},
-		Action: func(c *cli.Context) error {
-			if err := b.applyEnvConfig(c); err != nil {
-				return err
-			}
-			b.client = NewHTTPClient(b.config)
-
-			result, err := b.client.Introspect(context.Background())
-			if err != nil {
-				return err
-			}
-
-			// Extract schema from response (unwrap the data field)
-			var schema interface{} = result
-			if data, ok := result["data"]; ok {
-				schema = data
-			}
-
-			// Format result
-			formatter, err := b.formatReg.Get(c.String("format"))
-			if err != nil {
-				return err
-			}
-
-			output, err := formatter.Format(schema.(map[string]interface{}))
-			if err != nil {
-				return err
-			}
-
-			// Write output
-			if outputFile := c.String("output"); outputFile != "" {
-				return os.WriteFile(outputFile, []byte(output), 0644)
-			}
-
-			fmt.Println(output)
-			return nil
-		},
-	}
-}
-
 // GetDescribeCommand returns the describe command
 func (b *CLIBuilder) GetDescribeCommand() *cli.Command {
 	return &cli.Command{
-		Name:      "describe",
-		Aliases:   []string{"d"},
-		Usage:     "Show the SDL definition of a GraphQL type",
-		ArgsUsage: "TYPE_NAME",
+		Name:        "describe",
+		Aliases:     []string{"d"},
+		Usage:       "Show the SDL definition of a GraphQL type",
+		ArgsUsage:   "TYPE_NAME",
+		Description: "Print the SDL definition of a single named GraphQL type.\n\nUse this to understand the shape of any type before writing a query or mutation.\nAdd --args to see what arguments each field accepts, --descriptions for doc strings.\n\nExamples:\n  gqlcli describe User\n  gqlcli describe CreateUserInput --args\n  gqlcli describe Order --args --descriptions",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "url",
@@ -319,8 +246,19 @@ func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "types",
 		Usage: "List all GraphQL types",
-		Description: "Display all available GraphQL types in the schema. " +
-			"Optionally filter by name or type kind.",
+		Description: "List all GraphQL types in the schema.\n\n" +
+			"Use --kind to narrow to a specific category:\n" +
+			"  OBJECT        Regular output types (the ones queries return)\n" +
+			"  INPUT_OBJECT  Input types used as mutation arguments\n" +
+			"  ENUM          Enumeration types\n" +
+			"  SCALAR        Scalar types (String, Int, custom scalars)\n" +
+			"  INTERFACE     Interface definitions\n" +
+			"  UNION         Union types\n\n" +
+			"After finding a type name, use 'describe <TYPE>' to see its field definitions.\n\n" +
+			"Examples:\n" +
+			"  gqlcli types\n" +
+			"  gqlcli types --kind INPUT_OBJECT\n" +
+			"  gqlcli types --filter user",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "url",
@@ -400,6 +338,12 @@ func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 				typesList = filtered
 			}
 
+			// Default (toon) format: SDL-like output per type
+			if c.String("format") == "toon" {
+				fmt.Print(formatTypesAsSDL(typesList))
+				return nil
+			}
+
 			// Format and output
 			formatter, err := b.formatReg.Get(c.String("format"))
 			if err != nil {
@@ -425,9 +369,14 @@ func (b *CLIBuilder) GetQueriesCommand() *cli.Command {
 		Name:    "queries",
 		Aliases: []string{"q-list"},
 		Usage:   "List all available Query fields",
-		Description: "Display all available GraphQL Query fields. " +
-			"Optionally include descriptions and arguments. " +
-			"Use --filter to search by field name.",
+		Description: "List all top-level Query fields available on the endpoint.\n\n" +
+			"Run this first to discover what queries exist before executing one.\n" +
+			"Add --args to see what arguments each field accepts.\n" +
+			"Add --desc to include schema descriptions (useful for understanding intent).\n\n" +
+			"Examples:\n" +
+			"  gqlcli queries\n" +
+			"  gqlcli queries --args --desc\n" +
+			"  gqlcli queries --filter user --args",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "url",
@@ -491,6 +440,17 @@ func (b *CLIBuilder) GetQueriesCommand() *cli.Command {
 				fields = filterOperations(fields, filter)
 			}
 
+			// Default (toon) format: SDL-like output matching 'describe Query'
+			if c.String("format") == "toon" {
+				typeInfo := map[string]interface{}{
+					"name":   "Query",
+					"kind":   "OBJECT",
+					"fields": fields,
+				}
+				fmt.Print(FormatTypeSDL(typeInfo, c.Bool("args"), !c.Bool("desc")))
+				return nil
+			}
+
 			// Format and output
 			formatter, err := b.formatReg.Get(c.String("format"))
 			if err != nil {
@@ -516,9 +476,14 @@ func (b *CLIBuilder) GetMutationsCommand() *cli.Command {
 		Name:    "mutations",
 		Aliases: []string{"m-list"},
 		Usage:   "List all available Mutation fields",
-		Description: "Display all available GraphQL Mutation fields. " +
-			"Optionally include descriptions and arguments. " +
-			"Use --filter to search by field name.",
+		Description: "List all top-level Mutation fields available on the endpoint.\n\n" +
+			"Run this first to discover what mutations exist before executing one.\n" +
+			"Add --args to see what arguments (and their types) each mutation accepts.\n" +
+			"Add --desc to include schema descriptions.\n\n" +
+			"Examples:\n" +
+			"  gqlcli mutations\n" +
+			"  gqlcli mutations --args --desc\n" +
+			"  gqlcli mutations --filter create --args",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "url",
@@ -582,6 +547,17 @@ func (b *CLIBuilder) GetMutationsCommand() *cli.Command {
 				fields = filterOperations(fields, filter)
 			}
 
+			// Default (toon) format: SDL-like output matching 'describe Mutation'
+			if c.String("format") == "toon" {
+				typeInfo := map[string]interface{}{
+					"name":   "Mutation",
+					"kind":   "OBJECT",
+					"fields": fields,
+				}
+				fmt.Print(FormatTypeSDL(typeInfo, c.Bool("args"), !c.Bool("desc")))
+				return nil
+			}
+
 			// Format and output
 			formatter, err := b.formatReg.Get(c.String("format"))
 			if err != nil {
@@ -606,7 +582,6 @@ func (b *CLIBuilder) RegisterCommands(app *cli.App) {
 	app.Commands = append(app.Commands,
 		b.GetQueryCommand(),
 		b.GetMutationCommand(),
-		b.GetIntrospectCommand(),
 		b.GetTypesCommand(),
 		b.GetDescribeCommand(),
 		b.GetQueriesCommand(),
@@ -794,11 +769,29 @@ func (b *CLIBuilder) outputResult(c *cli.Context, result map[string]interface{})
 
 // buildOperationListQuery constructs an introspection query for Query or Mutation type
 func buildOperationListQuery(typeName string, includeDesc, includeArgs bool) string {
+	const typeRefFragment = `{
+					kind
+					name
+					ofType {
+						kind
+						name
+						ofType {
+							kind
+							name
+							ofType {
+								kind
+								name
+							}
+						}
+					}
+				}`
+
 	query := fmt.Sprintf(`
 	{
 		__type(name: "%s") {
 			fields {
-				name`, typeName)
+				name
+				type %s`, typeName, typeRefFragment)
 
 	if includeDesc {
 		query += `
@@ -809,22 +802,7 @@ func buildOperationListQuery(typeName string, includeDesc, includeArgs bool) str
 		query += `
 				args {
 					name
-					type {
-						kind
-						name
-						ofType {
-							kind
-							name
-							ofType {
-								kind
-								name
-								ofType {
-									kind
-									name
-								}
-							}
-						}
-					}
+					type ` + typeRefFragment + `
 				}`
 	}
 

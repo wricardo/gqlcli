@@ -159,8 +159,38 @@ func (f *LLMFormatter) Format(data map[string]interface{}) (string, error) {
 		return buf.String(), nil
 	}
 
-	// Format data
-	dataField, _ := data["data"].(map[string]interface{})
+	// Handle queries/mutations lists: render as SDL in a code block
+	for _, key := range []string{"queries", "mutations"} {
+		if fields, ok := data[key].([]interface{}); ok {
+			typeName := "Query"
+			if key == "mutations" {
+				typeName = "Mutation"
+			}
+			typeInfo := map[string]interface{}{
+				"name":   typeName,
+				"kind":   "OBJECT",
+				"fields": fields,
+			}
+			fmt.Fprintf(&buf, "```graphql\n")
+			fmt.Fprint(&buf, FormatTypeSDL(typeInfo, true, false))
+			fmt.Fprintf(&buf, "```\n")
+			return buf.String(), nil
+		}
+	}
+
+	// Handle types list: render each type as SDL
+	if typesList, ok := data["types"].([]interface{}); ok {
+		fmt.Fprintf(&buf, "```graphql\n")
+		fmt.Fprint(&buf, formatTypesAsSDL(typesList))
+		fmt.Fprintf(&buf, "```\n")
+		return buf.String(), nil
+	}
+
+	// Format data (unwrap GraphQL response envelope if present)
+	dataField, ok := data["data"].(map[string]interface{})
+	if !ok {
+		dataField = data
+	}
 	formatDataAsMarkdown(&buf, dataField)
 
 	return buf.String(), nil

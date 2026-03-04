@@ -284,6 +284,24 @@ func sortFieldsByType(fields []interface{}) []map[string]interface{} {
 	return out
 }
 
+// formatTypesAsSDL renders a list of type introspection objects as SDL definitions,
+// skipping built-in introspection types (names starting with "__").
+func formatTypesAsSDL(typesList []interface{}) string {
+	var b strings.Builder
+	for _, t := range typesList {
+		tm, ok := t.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := tm["name"].(string)
+		if strings.HasPrefix(name, "__") {
+			continue
+		}
+		b.WriteString(FormatTypeSDL(tm, false, true))
+	}
+	return b.String()
+}
+
 func formatSDLField(field map[string]interface{}, showArgs bool) string {
 	var b strings.Builder
 	fname, _ := field["name"].(string)
