@@ -96,8 +96,10 @@ gqlcli queries --filter user -f compact         # Minimal JSON
 ### 🔐 Configuration
 - Default endpoint: `http://localhost:8080/graphql`
 - Override via `--url` flag or `GRAPHQL_URL` environment variable
+- Per-directory config file: `.gqlcli.json` with named environments (`local`, `prod`, `qa`, …)
+- Switch environments at runtime with `--env prod`
 - Bearer token authentication support
-- Custom HTTP headers and timeouts
+- Custom HTTP headers per environment
 - Debug mode for request/response logging
 
 ### 📝 Input Methods
@@ -202,20 +204,57 @@ gqlcli types -f compact
 
 ### Environment Configuration
 
+#### Option 1 — Environment variable
+
 ```bash
-# Configure default endpoint
 export GRAPHQL_URL="http://staging-api.example.com/graphql"
-
-# Commands will use staging endpoint
 gqlcli queries
-gqlcli query --query "{ users { id } }"
-
-# Override with flag
-gqlcli -u http://prod-api.example.com/graphql queries
-
-# Use default
-gqlcli queries  # Uses GRAPHQL_URL or localhost:8080
 ```
+
+#### Option 2 — `.gqlcli.json` (per-directory config)
+
+Create `.gqlcli.json` in your project directory to define named environments:
+
+```json
+{
+  "default": "local",
+  "environments": {
+    "local": {
+      "url": "http://localhost:8080/graphql",
+      "headers": {
+        "Authorization": "Bearer dev-token"
+      }
+    },
+    "staging": {
+      "url": "http://staging-api.example.com/graphql",
+      "headers": {
+        "Authorization": "Bearer staging-token",
+        "X-Tenant": "acme"
+      }
+    },
+    "prod": {
+      "url": "https://api.example.com/graphql",
+      "headers": {
+        "Authorization": "Bearer prod-token"
+      }
+    }
+  }
+}
+```
+
+```bash
+# Uses "local" (the default)
+gqlcli queries
+
+# Switch to prod
+gqlcli queries --env prod
+gqlcli query --query "{ users { id } }" --env prod
+
+# Override URL on top of a named env
+gqlcli queries --env staging --url http://other-host/graphql
+```
+
+**Priority** (lowest → highest): hardcoded default → `.gqlcli.json` env → `GRAPHQL_URL` → `--url` flag
 
 ### Advanced: Save Results to File
 
@@ -237,6 +276,7 @@ gqlcli types --output types.json
 ### Global Flags
 ```
 -u, --url VALUE       GraphQL endpoint (default: http://localhost:8080/graphql, env: GRAPHQL_URL)
+--env VALUE           Environment to use from .gqlcli.json (e.g. local, prod)
 -f, --format VALUE    Output format: json, json-pretty, table, compact, toon, llm (default: toon)
 -p, --pretty          Pretty print JSON output
 -h, --help            Show help
@@ -251,6 +291,8 @@ gqlcli types --output types.json
 -o, --operation STRING       Named operation to execute
 -f, --format FORMAT          Output format
 --output FILE                Write to file
+-u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
+--env VALUE                  Environment from .gqlcli.json
 -d, --debug                  Enable HTTP debug logging
 ```
 
@@ -264,6 +306,8 @@ gqlcli types --output types.json
 -o, --operation STRING       Named operation
 -f, --format FORMAT          Output format
 --output FILE                Write to file
+-u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
+--env VALUE                  Environment from .gqlcli.json
 -d, --debug                  Enable HTTP debug logging
 ```
 
@@ -274,6 +318,7 @@ gqlcli types --output types.json
 --filter PATTERN             Filter by name (case-insensitive)
 -f, --format FORMAT          Output format (default: toon)
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
+--env VALUE                  Environment from .gqlcli.json
 -d, --debug                  Enable debug logging
 ```
 
@@ -284,6 +329,7 @@ gqlcli types --output types.json
 --filter PATTERN             Filter by name (case-insensitive)
 -f, --format FORMAT          Output format (default: toon)
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
+--env VALUE                  Environment from .gqlcli.json
 -d, --debug                  Enable debug logging
 ```
 
@@ -293,6 +339,7 @@ gqlcli types --output types.json
 -o, --output FILE            Write schema to file
 -p, --pretty                 Pretty print JSON
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
+--env VALUE                  Environment from .gqlcli.json
 -d, --debug                  Enable debug logging
 ```
 
@@ -302,6 +349,7 @@ gqlcli types --output types.json
 --kind KIND                  Filter by kind (OBJECT, ENUM, INPUT_OBJECT, SCALAR, INTERFACE, UNION)
 -f, --format FORMAT          Output format (default: compact)
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
+--env VALUE                  Environment from .gqlcli.json
 -d, --debug                  Enable debug logging
 ```
 
@@ -516,6 +564,7 @@ pkg/
 ├── client.go           # HTTP GraphQL client
 ├── inline.go           # InlineExecutor — in-process execution
 ├── inline_commands.go  # InlineCommandSet — query/mutation/describe/login commands
+├── projectconfig.go    # .gqlcli.json loader and environment resolution
 ├── token.go            # TokenStore — JWT persistence and parsing
 ├── describe.go         # Describer — schema introspection and SDL formatting
 ├── formatter.go        # Output formatters
@@ -727,6 +776,7 @@ Built with:
 **Active Development** — Maintained and open to contributions.
 
 Latest features:
+- ✅ `.gqlcli.json` project config — named environments with URL and custom headers, `--env` flag
 - ✅ Inline execution — run operations in-process against a gqlgen schema (no HTTP server)
 - ✅ Schema hints — attach type SDL to GraphQL validation errors
 - ✅ Token store — JWT persistence and parsing for login/logout/whoami

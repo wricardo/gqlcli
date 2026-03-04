@@ -13,21 +13,58 @@ import (
 
 // CLIBuilder creates CLI commands for GraphQL operations
 type CLIBuilder struct {
-	client    Client
-	config    *Config
-	formatReg FormatterRegistry
+	client        Client
+	config        *Config
+	formatReg     FormatterRegistry
+	projectConfig *ProjectConfig
 }
 
 // NewCLIBuilder creates a new CLI command builder
 func NewCLIBuilder(cfg *Config) *CLIBuilder {
+	projectConfig, err := LoadProjectConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	}
+
+	// Pre-apply the default environment so flag defaults reflect it
+	if projectConfig != nil {
+		if env, _ := projectConfig.Resolve(""); env != nil && env.URL != "" {
+			cfg.URL = env.URL
+		}
+	}
+
 	client := NewHTTPClient(cfg)
 	formatReg := NewFormatterRegistry()
 
 	return &CLIBuilder{
-		client:    client,
-		config:    cfg,
-		formatReg: formatReg,
+		client:        client,
+		config:        cfg,
+		formatReg:     formatReg,
+		projectConfig: projectConfig,
 	}
+}
+
+// applyEnvConfig applies the selected environment from .gqlcli.json to b.config,
+// then lets explicit CLI flags (--url, --debug) override it.
+func (b *CLIBuilder) applyEnvConfig(c *cli.Context) error {
+	if b.projectConfig != nil {
+		env, err := b.projectConfig.Resolve(c.String("env"))
+		if err != nil {
+			return err
+		}
+		if env != nil {
+			if env.URL != "" {
+				b.config.URL = env.URL
+			}
+			b.config.Headers = env.Headers
+		}
+	}
+	// Explicit --url / GRAPHQL_URL env var overrides project config
+	if c.IsSet("url") {
+		b.config.URL = c.String("url")
+	}
+	b.config.Debug = c.Bool("debug")
+	return nil
 }
 
 // GetQueryCommand returns the query subcommand
@@ -41,9 +78,9 @@ func (b *CLIBuilder) GetQueryCommand() *cli.Command {
 			"Variables can be provided via --variables (inline JSON) or --variables-file.",
 		Flags: b.getOperationFlags(),
 		Action: func(c *cli.Context) error {
-			// Update config with command-line flags
-			b.config.URL = c.String("url")
-			b.config.Debug = c.Bool("debug")
+			if err := b.applyEnvConfig(c); err != nil {
+				return err
+			}
 			b.client = NewHTTPClient(b.config)
 
 			// Get query from various sources
@@ -93,9 +130,9 @@ func (b *CLIBuilder) GetMutationCommand() *cli.Command {
 			},
 		),
 		Action: func(c *cli.Context) error {
-			// Update config with command-line flags
-			b.config.URL = c.String("url")
-			b.config.Debug = c.Bool("debug")
+			if err := b.applyEnvConfig(c); err != nil {
+				return err
+			}
 			b.client = NewHTTPClient(b.config)
 
 			// Get mutation from various sources
@@ -177,11 +214,15 @@ func (b *CLIBuilder) GetIntrospectCommand() *cli.Command {
 				Usage:   "Pretty print JSON output (only for json format)",
 				Value:   false,
 			},
+			&cli.StringFlag{
+				Name:  "env",
+				Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
+			},
 		},
 		Action: func(c *cli.Context) error {
-			// Update config with command-line flags
-			b.config.URL = c.String("url")
-			b.config.Debug = c.Bool("debug")
+			if err := b.applyEnvConfig(c); err != nil {
+				return err
+			}
 			b.client = NewHTTPClient(b.config)
 
 			result, err := b.client.Introspect(context.Background())
@@ -247,10 +288,15 @@ func (b *CLIBuilder) GetDescribeCommand() *cli.Command {
 				Name:  "descriptions",
 				Usage: "Include field/type descriptions",
 			},
+			&cli.StringFlag{
+				Name:  "env",
+				Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
+			},
 		},
 		Action: func(c *cli.Context) error {
-			b.config.URL = c.String("url")
-			b.config.Debug = c.Bool("debug")
+			if err := b.applyEnvConfig(c); err != nil {
+				return err
+			}
 			httpClient := NewHTTPClient(b.config)
 
 			if c.NArg() == 0 {
@@ -304,11 +350,15 @@ func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 				Usage:   "Output format: toon (default), json, table, compact",
 				Value:   "toon",
 			},
+			&cli.StringFlag{
+				Name:  "env",
+				Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
+			},
 		},
 		Action: func(c *cli.Context) error {
-			// Update config with command-line flags
-			b.config.URL = c.String("url")
-			b.config.Debug = c.Bool("debug")
+			if err := b.applyEnvConfig(c); err != nil {
+				return err
+			}
 			b.client = NewHTTPClient(b.config)
 
 			result, err := b.client.Introspect(context.Background())
@@ -410,11 +460,15 @@ func (b *CLIBuilder) GetQueriesCommand() *cli.Command {
 				Usage:   "Output format: toon (default), json, json-pretty, table, compact, llm",
 				Value:   "toon",
 			},
+			&cli.StringFlag{
+				Name:  "env",
+				Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
+			},
 		},
 		Action: func(c *cli.Context) error {
-			// Update config with command-line flags
-			b.config.URL = c.String("url")
-			b.config.Debug = c.Bool("debug")
+			if err := b.applyEnvConfig(c); err != nil {
+				return err
+			}
 			b.client = NewHTTPClient(b.config)
 
 			// Build and execute introspection query
@@ -497,11 +551,15 @@ func (b *CLIBuilder) GetMutationsCommand() *cli.Command {
 				Usage:   "Output format: toon (default), json, json-pretty, table, compact, llm",
 				Value:   "toon",
 			},
+			&cli.StringFlag{
+				Name:  "env",
+				Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
+			},
 		},
 		Action: func(c *cli.Context) error {
-			// Update config with command-line flags
-			b.config.URL = c.String("url")
-			b.config.Debug = c.Bool("debug")
+			if err := b.applyEnvConfig(c); err != nil {
+				return err
+			}
 			b.client = NewHTTPClient(b.config)
 
 			// Build and execute introspection query
@@ -625,6 +683,10 @@ func (b *CLIBuilder) getOperationFlags() []cli.Flag {
 		&cli.StringFlag{
 			Name:  "output",
 			Usage: "Output file path (default: stdout)",
+		},
+		&cli.StringFlag{
+			Name:  "env",
+			Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
 		},
 	}
 }

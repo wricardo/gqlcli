@@ -58,6 +58,11 @@ func NewHTTPClient(cfg *Config) *HTTPClient {
 		restClient.SetDebug(true)
 	}
 
+	// Apply custom headers first so Token can override Authorization if needed
+	for k, v := range cfg.Headers {
+		restClient.SetHeader(k, v)
+	}
+
 	// Add auth if configured
 	if cfg.Token != "" {
 		restClient.SetHeader("Authorization", fmt.Sprintf("Bearer %s", cfg.Token))
