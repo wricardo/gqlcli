@@ -258,7 +258,7 @@ func (c *HTTPClient) enrichErrors(ctx context.Context, errors []interface{}) {
 			ext = make(map[string]interface{})
 			em["extensions"] = ext
 		}
-		ext["schemaHint"] = hint
+		ext["schemaHint"] = truncateHint(hint)
 	}
 }
 

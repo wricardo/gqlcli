@@ -94,6 +94,18 @@ func (e *InlineExecutor) ExecuteFunc() func(context.Context, string, map[string]
 	return e.Execute
 }
 
+// MaxSchemaHintChars is the maximum number of characters returned in a schemaHint extension.
+// Hints longer than this are truncated with a trailing "..." marker.
+const MaxSchemaHintChars = 10000
+
+// truncateHint caps hint to MaxSchemaHintChars characters.
+func truncateHint(hint string) string {
+	if len(hint) <= MaxSchemaHintChars {
+		return hint
+	}
+	return hint[:MaxSchemaHintChars] + "..."
+}
+
 // --- schema hint error presenter ---
 
 var (
@@ -128,7 +140,7 @@ func makeSchemaHintPresenter(d *Describer) graphql.ErrorPresenterFunc {
 				if gqlErr.Extensions == nil {
 					gqlErr.Extensions = map[string]interface{}{}
 				}
-				gqlErr.Extensions["schemaHint"] = hint
+				gqlErr.Extensions["schemaHint"] = truncateHint(hint)
 			}
 		}
 		return gqlErr
