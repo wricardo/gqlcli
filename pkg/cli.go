@@ -77,10 +77,17 @@ func (b *CLIBuilder) GetQueryCommand() *cli.Command {
 			"Query source (pick one): --query flag, --query-file, or first positional argument.\n" +
 			"Variables: --variables '{\"id\":\"123\"}' (inline JSON) or --variables-file vars.json.\n\n" +
 			"Use --format llm for LLM-friendly output; --format json when parsing programmatically.\n\n" +
+			"JQ FILTERING\n" +
+			"  Pipe --format json output to jq to extract specific fields:\n" +
+			"    gqlcli query '{ users { id name } }' --format json | jq '.data.users[].name'\n\n" +
+			"BATCHING\n" +
+			"  To run multiple queries in one request, use the 'batch' command:\n" +
+			"    echo '{\"query\":\"{ users { id } }\"}' | gqlcli batch\n\n" +
 			"Examples:\n" +
 			"  gqlcli query '{ users { id name } }'\n" +
 			"  gqlcli query '{ user(id:$id) { name } }' --variables '{\"id\":\"42\"}'\n" +
-			"  gqlcli query --query-file myquery.graphql --format llm",
+			"  gqlcli query --query-file myquery.graphql --format llm\n" +
+			"  gqlcli query '{ users { id name } }' --format json | jq '.data.users'",
 		Flags: b.getOperationFlags(),
 		Action: func(c *cli.Context) error {
 			if err := b.applyEnvConfig(c); err != nil {
@@ -128,11 +135,18 @@ func (b *CLIBuilder) GetMutationCommand() *cli.Command {
 			"Mutation source (pick one): --mutation flag, --mutation-file, or first positional argument.\n" +
 			"Variables: --variables '{\"id\":\"123\"}' or --variables-file vars.json.\n" +
 			"--input shortcut: pass the input object directly; it is automatically wrapped as {\"input\":{...}}.\n\n" +
+			"JQ FILTERING\n" +
+			"  Pipe --format json output to jq to extract specific fields:\n" +
+			"    gqlcli mutation '...' --format json | jq '.data.createUser.id'\n\n" +
+			"BATCHING\n" +
+			"  To run multiple mutations in one request, use the 'batch' command:\n" +
+			"    printf '{\"query\":\"mutation { a { ok } }\"}\\n{\"query\":\"mutation { b { ok } }\"}\\n' | gqlcli batch\n\n" +
 			"Examples:\n" +
 			"  gqlcli mutation 'mutation { deleteUser(id:\"1\") { ok } }'\n" +
 			"  gqlcli mutation 'mutation CreateUser($input: CreateUserInput!) { createUser(input: $input) { id } }' \\\n" +
 			"    --input '{\"name\":\"Alice\",\"email\":\"alice@example.com\"}'\n" +
-			"  gqlcli mutation --mutation-file create_user.graphql --variables-file vars.json",
+			"  gqlcli mutation --mutation-file create_user.graphql --variables-file vars.json\n" +
+			"  gqlcli mutation '...' --format json | jq '.data.createUser'",
 		Flags: append(b.getOperationFlags(),
 			&cli.StringFlag{
 				Name:  "input",
@@ -582,6 +596,7 @@ func (b *CLIBuilder) RegisterCommands(app *cli.App) {
 	app.Commands = append(app.Commands,
 		b.GetQueryCommand(),
 		b.GetMutationCommand(),
+		b.GetBatchCommand(),
 		b.GetTypesCommand(),
 		b.GetDescribeCommand(),
 		b.GetQueriesCommand(),

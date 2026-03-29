@@ -76,6 +76,7 @@ func (cs *InlineCommandSet) Commands() []*cli.Command {
 	cmds := []*cli.Command{
 		cs.queryCommand(),
 		cs.mutationCommand(),
+		cs.batchCommand(),
 		cs.describeCommand(),
 		cs.typesCommand(),
 	}

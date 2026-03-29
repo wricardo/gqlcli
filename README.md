@@ -49,11 +49,11 @@ gqlcli queries --desc
 # Show mutation arguments and types
 gqlcli mutations --args
 
-# Explore schema in readable format
-gqlcli introspect --format table
+# Explore all types
+gqlcli types
 
-# Export schema as JSON
-gqlcli introspect --format json > schema.json
+# Inspect a specific type
+gqlcli describe User --args
 
 # Execute a mutation with variables
 gqlcli mutation \
@@ -81,8 +81,9 @@ gqlcli queries --filter user -f compact         # Minimal JSON
 ### 🎯 Commands
 - **`query`** — Execute GraphQL queries with variables and multiple input methods
 - **`mutation`** — Execute mutations with auto-wrapped input objects
-- **`introspect`** — Download and explore full GraphQL schema
+- **`batch`** — Execute multiple operations in one request (NDJSON or JSON array) with jq filtering
 - **`types`** — List all schema types with filtering
+- **`describe`** — Print SDL definition of a named type
 - **`queries`** — Discover available Query fields instantly
 - **`mutations`** — Discover available Mutation fields instantly
 
@@ -178,15 +179,53 @@ gqlcli mutation \
   --variables '{"input":{"name":"Alice"}}'
 ```
 
+### Batch Operations
+
+Execute multiple GraphQL operations in a single request. Supports two wire formats:
+- **NDJSON** (default) — one JSON object per line, `Content-Type: application/x-ndjson`
+- **JSON array** — standard batch format, `Content-Type: application/json`
+
+Each operation can include an optional `"jq"` field for server-side response filtering.
+
+```bash
+# Multiple queries via NDJSON (pipe from stdin)
+printf '{"query":"{ users { id name } }"}\n{"query":"{ posts { id title } }"}\n' \
+  | gqlcli batch
+
+# Server-side jq filtering (per operation)
+printf '{"query":"{ users { id name status } }","jq":".data.users[] | select(.status == \"active\") | .name"}\n' \
+  | gqlcli batch
+
+# JSON array batch mode
+printf '{"query":"{ users { id } }"}\n{"query":"{ posts { id } }"}\n' \
+  | gqlcli batch --array
+
+# Client-side jq (applied to all responses)
+printf '{"query":"{ users { id name } }"}\n' \
+  | gqlcli batch --jq '.data'
+
+# From a file
+gqlcli batch --file operations.ndjson
+
+# Pipeline: query -> filter -> feed into mutations
+gqlcli query -q '{ users { id status } }' -f json \
+  | jq -c '.data.users[] | select(.status == "inactive") | {query: "mutation($id:ID!){archive(id:$id){ok}}", variables: {id: .id}}' \
+  | gqlcli batch
+```
+
+**jq examples for the `"jq"` field:**
+| Expression | Effect |
+|-----------|--------|
+| `.data` | Strip the GraphQL envelope |
+| `.data.users[].name` | Extract a field from each array element |
+| `.data.users \| length` | Count results |
+| `.data.users[] \| select(.active)` | Filter array items |
+| `.data.logs[] \| select(.message \| test("error"))` | Regex match |
+| `.data \| {count: (.users \| length), first: .users[0]}` | Transform/reshape |
+
 ### Schema Exploration
 
 ```bash
-# Full schema introspection
-gqlcli introspect --format json-pretty > schema.json
-
-# LLM-friendly schema
-gqlcli introspect --format llm
-
 # List all types
 gqlcli types
 
@@ -262,9 +301,6 @@ gqlcli queries --env staging --url http://other-host/graphql
 # Query result to file
 gqlcli query --query "{ users { id } }" --output results.json
 
-# Schema to file
-gqlcli introspect --format json --output schema.json
-
 # Types list to file
 gqlcli types --output types.json
 ```
@@ -311,6 +347,17 @@ gqlcli types --output types.json
 -d, --debug                  Enable HTTP debug logging
 ```
 
+### `batch` Command
+```
+--ndjson                     Use NDJSON transport (default)
+--array                      Use JSON array batch transport
+--file PATH                  Read operations from file instead of stdin
+--jq EXPR                    Apply jq expression to each response (client-side)
+-u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
+--env VALUE                  Environment from .gqlcli.json
+-d, --debug                  Enable HTTP debug logging
+```
+
 ### `queries` Command
 ```
 --desc                       Include field descriptions
@@ -333,11 +380,11 @@ gqlcli types --output types.json
 -d, --debug                  Enable debug logging
 ```
 
-### `introspect` Command
+### `describe` Command
 ```
--f, --format FORMAT          Output format (default: llm)
--o, --output FILE            Write schema to file
--p, --pretty                 Pretty print JSON
+TYPE_NAME                    Name of the type to describe (required)
+--args, -a                   Expand field argument signatures
+--descriptions               Include field/type descriptions
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
 --env VALUE                  Environment from .gqlcli.json
 -d, --debug                  Enable debug logging
@@ -483,6 +530,7 @@ This adds the following subcommands:
 |---------|-------------|
 | `query` | Execute a query (TOON format by default) |
 | `mutation` | Execute a mutation (JSON format by default) |
+| `batch` | Execute multiple operations from stdin (NDJSON) with jq filtering |
 | `describe TYPE` | Print SDL definition of a type |
 | `types` | List all types in the schema |
 
@@ -562,6 +610,7 @@ See [example/README.md](example/README.md) for detailed setup and usage.
 pkg/
 ├── cli.go              # HTTP-based CLI command builders (CLIBuilder)
 ├── client.go           # HTTP GraphQL client
+├── batch.go            # Batch/NDJSON execution + jq filtering
 ├── inline.go           # InlineExecutor — in-process execution
 ├── inline_commands.go  # InlineCommandSet — query/mutation/describe/login commands
 ├── projectconfig.go    # .gqlcli.json loader and environment resolution
@@ -630,28 +679,30 @@ gqlcli mutation \
 
 ### Schema Documentation
 ```bash
-# Generate schema documentation
-gqlcli introspect --format llm > SCHEMA.md
-
-# List all types
+# Export all types as JSON
 gqlcli types --format json-pretty > types.json
+
+# Describe specific types
+gqlcli describe User --args --descriptions
+gqlcli describe CreateUserInput --args
 ```
 
 ### CI/CD Pipelines
 ```bash
-# Verify schema changes
-gqlcli introspect --format json > current-schema.json
-git diff previous-schema.json current-schema.json
+# Capture types for schema drift detection
+gqlcli types --format json > current-types.json
+git diff previous-types.json current-types.json
 ```
 
 ### AI/LLM Integration
 ```bash
-# Get schema in token-efficient format
-gqlcli introspect --format toon
-
 # Discover operations for LLM context
 gqlcli queries --desc --format toon
 gqlcli mutations --desc --args --format toon
+
+# Inspect a type before writing a query
+gqlcli describe User --args
+gqlcli types --kind INPUT_OBJECT
 ```
 
 ---
@@ -768,6 +819,7 @@ Built with:
 - [urfave/cli](https://github.com/urfave/cli) — CLI framework
 - [go-resty/resty](https://github.com/go-resty/resty) — HTTP client
 - [toon-format/toon-go](https://github.com/toon-format/toon-go) — Token-optimized format
+- [itchyny/gojq](https://github.com/itchyny/gojq) — Pure Go jq implementation
 
 ---
 
@@ -776,6 +828,9 @@ Built with:
 **Active Development** — Maintained and open to contributions.
 
 Latest features:
+- ✅ **Batch operations** — execute multiple queries/mutations in one request (NDJSON + JSON array)
+- ✅ **Server-side jq filtering** — per-operation `"jq"` field for response transformation
+- ✅ **Client-side jq** — `--jq` flag applies jq to all batch responses
 - ✅ `.gqlcli.json` project config — named environments with URL and custom headers, `--env` flag
 - ✅ Inline execution — run operations in-process against a gqlgen schema (no HTTP server)
 - ✅ Schema hints — attach type SDL to GraphQL validation errors

@@ -42,6 +42,26 @@ TYPICAL AI WORKFLOW
        gqlcli mutation 'mutation CreateUser($input: CreateUserInput!) { createUser(input: $input) { id } }' \
          --input '{"name":"Alice","email":"alice@example.com"}'
 
+  4. Filter output with jq (use --format json first):
+       gqlcli query '{ users { id name } }' --format json | jq '.data.users[].name'
+       gqlcli query '{ users { id name } }' --format json | jq '.data.users | length'
+
+  5. Batch multiple operations in one request:
+       # NDJSON from stdin (default transport, one response line per operation)
+       printf '{"query":"{ users { id } }"}\n{"query":"{ posts { id } }"}\n' | gqlcli batch
+
+       # Server-side jq: include "jq" in each line — server filters before returning
+       # jq receives the full {"data":...} envelope, so start paths from .data
+       printf '{"query":"{ smsCampaigns { campaigns { id name } } }","jq":".data.smsCampaigns.campaigns[].name"}\n' | gqlcli batch
+       printf '{"query":"{ users { id name } }","jq":".data.users[] | select(.active)"}\n' | gqlcli batch
+       printf '{"query":"{ users { id } }","jq":".data.users | length"}\n' | gqlcli batch
+
+       # Client-side jq: --jq flag applies to every response after the server returns
+       printf '{"query":"{ users { id } }"}\n' | gqlcli batch --jq '.data.users | length'
+
+       # JSON array transport (single POST, returns a JSON array)
+       gqlcli batch --array --file operations.json
+
 OUTPUT FORMATS
   toon     Default. Readable tree output, good for terminal inspection.
   llm      Compact SDL-like text, minimal noise, best for feeding to an LLM.
