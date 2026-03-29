@@ -356,7 +356,7 @@ func outputBatchResults(results []json.RawMessage, requests []BatchRequest, clie
 	return nil
 }
 
-// GetBatchCommandInline returns the batch subcommand for InlineCommandSet.
+// batchCommand returns the batch subcommand for InlineCommandSet.
 func (cs *InlineCommandSet) batchCommand() *cli.Command {
 	return &cli.Command{
 		Name:    "batch",
