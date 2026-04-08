@@ -409,49 +409,61 @@ func formatTableValue(value interface{}) string {
 		}
 		return fmt.Sprintf("%.2f", v)
 	case []interface{}:
-		if len(v) == 0 {
-			return "[]"
-		}
-		if len(v) == 1 {
-			return fmt.Sprintf("[%s]", formatTableValue(v[0]))
-		}
-		return fmt.Sprintf("[%s, ... +%d more]", formatTableValue(v[0]), len(v)-1)
+		return formatTableSlice(v)
 	case map[string]interface{}:
-		if len(v) == 0 {
-			return "{}"
-		}
-		var parts []string
-		count := 0
-		for key, val := range v {
-			if count >= 3 {
-				parts = append(parts, "...")
-				break
-			}
-			var valStr string
-			switch val := val.(type) {
-			case string:
-				valStr = val
-			case nil:
-				valStr = "null"
-			case bool, float64:
-				valStr = fmt.Sprintf("%v", val)
-			case map[string]interface{}:
-				valStr = "{...}"
-			case []interface{}:
-				valStr = "[...]"
-			default:
-				valStr = fmt.Sprintf("%v", val)
-			}
-			if len(valStr) > 20 {
-				valStr = valStr[:17] + "..."
-			}
-			parts = append(parts, fmt.Sprintf("%s=%s", key, valStr))
-			count++
-		}
-		return fmt.Sprintf("{%s}", strings.Join(parts, ", "))
+		return formatTableMap(v)
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+func formatTableSlice(v []interface{}) string {
+	if len(v) == 0 {
+		return "[]"
+	}
+	if len(v) == 1 {
+		return fmt.Sprintf("[%s]", formatTableValue(v[0]))
+	}
+	return fmt.Sprintf("[%s, ... +%d more]", formatTableValue(v[0]), len(v)-1)
+}
+
+func formatTableMap(v map[string]interface{}) string {
+	if len(v) == 0 {
+		return "{}"
+	}
+	var parts []string
+	count := 0
+	for key, val := range v {
+		if count >= 3 {
+			parts = append(parts, "...")
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s", key, formatTableMapValue(val)))
+		count++
+	}
+	return fmt.Sprintf("{%s}", strings.Join(parts, ", "))
+}
+
+func formatTableMapValue(val interface{}) string {
+	var valStr string
+	switch val := val.(type) {
+	case string:
+		valStr = val
+	case nil:
+		valStr = "null"
+	case bool, float64:
+		valStr = fmt.Sprintf("%v", val)
+	case map[string]interface{}:
+		valStr = "{...}"
+	case []interface{}:
+		valStr = "[...]"
+	default:
+		valStr = fmt.Sprintf("%v", val)
+	}
+	if len(valStr) > 20 {
+		valStr = valStr[:17] + "..."
+	}
+	return valStr
 }
 
 func formatDataAsMarkdown(buf *strings.Builder, data map[string]interface{}) {

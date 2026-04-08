@@ -33,3 +33,6 @@ go.sum
 # Environment
 .env
 .env.local
+
+# Wiki
+gqlcli.wiki/

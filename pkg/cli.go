@@ -640,8 +640,8 @@ func (b *CLIBuilder) getOperationFlags() []cli.Flag {
 			Required: false,
 		},
 		&cli.StringFlag{
-			Name:    "mutation-file",
-			Usage:   "Path to .graphql file containing mutation",
+			Name:  "mutation-file",
+			Usage: "Path to .graphql file containing mutation",
 		},
 		&cli.StringFlag{
 			Name:    "variables",
