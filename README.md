@@ -16,12 +16,13 @@ Two tools in one:
 
 ### Installation
 
+Download a pre-built binary from the [Releases page](https://github.com/wricardo/gqlcli/releases/latest), or install with Go:
+
 ```bash
 go install github.com/wricardo/gqlcli/cmd/gqlcli@latest
-# or clone and build
-git clone https://github.com/wricardo/gqlcli.git
-cd gqlcli && make install
 ```
+
+See [Installation](#-installation) for platform-specific binary download instructions.
 
 ### Basic Usage
 
@@ -417,13 +418,44 @@ See sections below for detailed examples of each mode.
 
 ## 📦 Installation
 
-### CLI Tool
+### Download a Binary (no Go required)
+
+Download a pre-built binary from the [Releases page](https://github.com/wricardo/gqlcli/releases/latest):
+
+**macOS (Apple Silicon):**
+```bash
+curl -L https://github.com/wricardo/gqlcli/releases/latest/download/gqlcli_darwin_arm64.tar.gz | tar xz
+sudo mv gqlcli /usr/local/bin/
+```
+
+**macOS (Intel):**
+```bash
+curl -L https://github.com/wricardo/gqlcli/releases/latest/download/gqlcli_darwin_amd64.tar.gz | tar xz
+sudo mv gqlcli /usr/local/bin/
+```
+
+**Linux (x86_64):**
+```bash
+curl -L https://github.com/wricardo/gqlcli/releases/latest/download/gqlcli_linux_amd64.tar.gz | tar xz
+sudo mv gqlcli /usr/local/bin/
+```
+
+**Linux (ARM64):**
+```bash
+curl -L https://github.com/wricardo/gqlcli/releases/latest/download/gqlcli_linux_arm64.tar.gz | tar xz
+sudo mv gqlcli /usr/local/bin/
+```
+
+**Windows:** Download `gqlcli_windows_amd64.zip` from the [Releases page](https://github.com/wricardo/gqlcli/releases/latest) and extract `gqlcli.exe` to a directory in your `PATH`.
+
+### Install with Go
 
 ```bash
 go install github.com/wricardo/gqlcli/cmd/gqlcli@latest
 ```
 
-Or clone and build:
+### Build from Source
+
 ```bash
 git clone https://github.com/wricardo/gqlcli.git
 cd gqlcli
