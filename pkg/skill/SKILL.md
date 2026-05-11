@@ -110,6 +110,58 @@ gqlcli query ... -f json-pretty # indented JSON
 gqlcli query ... --output out.json
 ```
 
+## Project config (.gqlcli.json)
+
+Named environments with URLs and headers. Loaded from the current directory.
+
+```bash
+gqlcli config init                          # create .gqlcli.json with a sample local env
+gqlcli config add-env --name prod --url https://api.example.com/graphql
+gqlcli config add-env --name prod --url https://api.example.com/graphql \
+  --header "Authorization=Bearer tok" --header "X-Api-Key=secret"
+gqlcli config set-default --name prod       # use prod when --env is omitted
+gqlcli config remove-env --name prod
+gqlcli config list                          # show all envs, * marks the default
+```
+
+`.gqlcli.json` structure:
+
+```json
+{
+  "default": "local",
+  "environments": {
+    "local": {
+      "url": "http://localhost:8080/graphql",
+      "headers": { "Authorization": "Bearer dev-token" }
+    },
+    "prod": {
+      "url": "https://api.example.com/graphql",
+      "headers": { "Authorization": "Bearer prod-token" }
+    }
+  }
+}
+```
+
+## Authentication
+
+```bash
+# First login — mutation and token-path are saved for future re-authentication
+gqlcli login --env prod \
+  --mutation 'mutation Login($email: String!, $password: String!) { login(email: $email, password: $password) { token } }' \
+  --variables '{"email":"you@example.com","password":"secret"}' \
+  --token-path login.token
+
+# Subsequent logins — mutation and token-path already stored in .gqlcli.json
+gqlcli login --env prod --variables '{"email":"you@example.com","password":"secret"}'
+
+# Clear the token
+gqlcli logout --env prod
+```
+
+`login` writes the token as `Authorization: Bearer <token>` in the env's headers and stores
+the mutation + token-path under `environments.<name>.login` for future use.
+Custom header name or prefix: `--header X-Auth-Token --prefix ""`.
+
 ## Other flags
 
 ```bash

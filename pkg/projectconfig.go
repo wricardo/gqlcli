@@ -32,6 +32,14 @@ type ProjectConfig struct {
 type EnvConfig struct {
 	URL     string            `json:"url"`
 	Headers map[string]string `json:"headers,omitempty"`
+	Login   *EnvLoginConfig   `json:"login,omitempty"`
+}
+
+// EnvLoginConfig stores the login mutation and token path for an environment,
+// so gqlcli login can re-authenticate without repeating the mutation string.
+type EnvLoginConfig struct {
+	Mutation  string `json:"mutation"`
+	TokenPath string `json:"token_path"`
 }
 
 // LoadProjectConfig reads .gqlcli.json from the current directory.
