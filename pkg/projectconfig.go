@@ -24,8 +24,18 @@ import (
 //	  }
 //	}
 type ProjectConfig struct {
-	Default      string               `json:"default"`
-	Environments map[string]EnvConfig `json:"environments"`
+	Default      string                     `json:"default"`
+	Environments map[string]EnvConfig       `json:"environments"`
+	Operations   map[string]NamedOperation  `json:"operations,omitempty"`
+}
+
+// NamedOperation is a saved GraphQL query or mutation stored in .gqlcli.json.
+// Execute with --op <name> on the query or mutation commands.
+type NamedOperation struct {
+	Type     string                 `json:"type"`               // "query" or "mutation"
+	Query    string                 `json:"query,omitempty"`    // set when Type == "query"
+	Mutation string                 `json:"mutation,omitempty"` // set when Type == "mutation"
+	Defaults map[string]interface{} `json:"defaults,omitempty"` // default variables; --variables overrides
 }
 
 // EnvConfig holds per-environment connection settings.

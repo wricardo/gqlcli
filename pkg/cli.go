@@ -605,6 +605,7 @@ func (b *CLIBuilder) RegisterCommands(app *cli.App) {
 		b.GetConfigCommand(),
 		b.GetLoginCommand(),
 		b.GetLogoutCommand(),
+		b.GetOpCommand(),
 	)
 }
 
@@ -681,6 +682,10 @@ func (b *CLIBuilder) getOperationFlags() []cli.Flag {
 			Name:  "env",
 			Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
 		},
+		&cli.StringFlag{
+			Name:  "op",
+			Usage: "Named operation from .gqlcli.json (provides query/mutation string + default variables)",
+		},
 	}
 }
 
@@ -701,7 +706,22 @@ func (b *CLIBuilder) getQueryString(c *cli.Context) (string, error) {
 		return c.Args().First(), nil
 	}
 
-	return "", fmt.Errorf("query is required (use --query, --query-file, or provide as argument)")
+	// Fall back to named operation
+	if opName := c.String("op"); opName != "" {
+		if b.projectConfig == nil {
+			return "", fmt.Errorf("--op requires .gqlcli.json")
+		}
+		op, ok := b.projectConfig.Operations[opName]
+		if !ok {
+			return "", fmt.Errorf("operation %q not found in .gqlcli.json", opName)
+		}
+		if op.Type != "query" {
+			return "", fmt.Errorf("operation %q is a %s, not a query; use the mutation command", opName, op.Type)
+		}
+		return op.Query, nil
+	}
+
+	return "", fmt.Errorf("query is required (use --query, --query-file, --op, or provide as argument)")
 }
 
 func (b *CLIBuilder) getMutationString(c *cli.Context) (string, error) {
@@ -721,7 +741,22 @@ func (b *CLIBuilder) getMutationString(c *cli.Context) (string, error) {
 		return c.Args().First(), nil
 	}
 
-	return "", fmt.Errorf("mutation is required (use --mutation, --mutation-file, or provide as argument)")
+	// Fall back to named operation
+	if opName := c.String("op"); opName != "" {
+		if b.projectConfig == nil {
+			return "", fmt.Errorf("--op requires .gqlcli.json")
+		}
+		op, ok := b.projectConfig.Operations[opName]
+		if !ok {
+			return "", fmt.Errorf("operation %q not found in .gqlcli.json", opName)
+		}
+		if op.Type != "mutation" {
+			return "", fmt.Errorf("operation %q is a %s, not a mutation; use the query command", opName, op.Type)
+		}
+		return op.Mutation, nil
+	}
+
+	return "", fmt.Errorf("mutation is required (use --mutation, --mutation-file, --op, or provide as argument)")
 }
 
 func (b *CLIBuilder) getVariables(c *cli.Context) (map[string]interface{}, error) {
@@ -735,17 +770,33 @@ func (b *CLIBuilder) getVariables(c *cli.Context) (map[string]interface{}, error
 		if err := json.Unmarshal(data, &variables); err != nil {
 			return nil, fmt.Errorf("invalid variables JSON in file: %w", err)
 		}
-		return variables, nil
-	}
-
-	if varStr := c.String("variables"); varStr != "" {
+	} else if varStr := c.String("variables"); varStr != "" {
 		if err := json.Unmarshal([]byte(varStr), &variables); err != nil {
 			return nil, fmt.Errorf("invalid variables JSON: %w", err)
 		}
-		return variables, nil
 	}
 
-	return nil, nil
+	// Merge named op defaults (explicit --variables wins over defaults)
+	if opName := c.String("op"); opName != "" && b.projectConfig != nil {
+		if op, ok := b.projectConfig.Operations[opName]; ok && len(op.Defaults) > 0 {
+			variables = mergeVariables(op.Defaults, variables)
+		}
+	}
+
+	return variables, nil
+}
+
+// mergeVariables returns a new map with defaults overlaid by overrides.
+// Keys in overrides take precedence.
+func mergeVariables(defaults, overrides map[string]interface{}) map[string]interface{} {
+	result := make(map[string]interface{}, len(defaults)+len(overrides))
+	for k, v := range defaults {
+		result[k] = v
+	}
+	for k, v := range overrides {
+		result[k] = v
+	}
+	return result
 }
 
 // handleError checks whether err is a *GraphQLResponseError and, if so, formats
