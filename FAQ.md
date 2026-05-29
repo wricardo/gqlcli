@@ -1,0 +1,1 @@
+gqlcli.wiki/FAQ.md

@@ -1,0 +1,1 @@
+gqlcli.wiki/Glossary.md
