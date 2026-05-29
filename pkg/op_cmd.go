@@ -47,6 +47,9 @@ func (b *CLIBuilder) GetOpCommand() *cli.Command {
 				},
 				Action: func(c *cli.Context) error {
 					name := c.String("name")
+					if name == "" {
+						return fmt.Errorf("--name must not be empty")
+					}
 
 					queryStr := c.String("query")
 					mutationStr := c.String("mutation")

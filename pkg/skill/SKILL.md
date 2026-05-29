@@ -64,6 +64,33 @@ gqlcli mutation \
   --variables '{"input":{"name":"Alice"}}'
 ```
 
+## Named operations (save and reuse)
+
+Save a query or mutation by name to avoid repeating it. Stored in `.gqlcli.json` under `"operations"`.
+
+```bash
+# Save
+gqlcli op save --name get-user \
+  --query 'query GetUser($id: ID!) { user(id: $id) { id name } }' \
+  --defaults '{"id":"default-123"}'
+
+gqlcli op save --name create-user \
+  --mutation 'mutation CreateUser($input: CreateUserInput!) { createUser(input: $input) { id } }'
+
+# CRUD
+gqlcli op list
+gqlcli op show --name get-user
+gqlcli op delete --name get-user
+
+# Execute by name — --variables overrides defaults
+gqlcli query --op get-user
+gqlcli query --op get-user --variables '{"id":"456"}'
+gqlcli mutation --op create-user --input '{"name":"Alice"}'
+gqlcli mutation --op create-user --env prod --input '{"name":"Alice"}'
+```
+
+`--op` is available on both `query` and `mutation` commands. Using a mutation-type op with `query` (or vice versa) returns an error.
+
 ## Batch operations
 
 Send multiple operations in one request. Each line is a JSON object with `"query"` (required),
