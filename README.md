@@ -84,7 +84,9 @@ gqlcli queries --filter user -f compact         # Minimal JSON
 ### 🎯 Commands
 - **`query`** — Execute GraphQL queries with variables and multiple input methods
 - **`mutation`** — Execute mutations with auto-wrapped input objects
+- **`subscribe`** — Stream GraphQL subscription events over WebSocket (`graphql-transport-ws`)
 - **`batch`** — Execute multiple operations in one request (NDJSON or JSON array) with jq filtering
+- **`op`** — Save, list, show, and delete named operations in `.gqlcli.json`
 - **`types`** — List all schema types with filtering
 - **`describe`** — Print SDL definition of a named type
 - **`queries`** — Discover available Query fields instantly
@@ -105,14 +107,18 @@ gqlcli queries --filter user -f compact         # Minimal JSON
 - Bearer token authentication support
 - Custom HTTP headers per environment
 - Debug mode for request/response logging
+- Per-request `--header/-H` overrides for one-off auth, tenant, trace, or preview headers
+- Curl-style HTTP controls: `--timeout`, `--retry`, `--retry-delay`, `--fail-on-graphql-errors`, and `--insecure`
+- Response metadata inspection with `--include-headers`, `--dump-headers`, and repeatable `--metadata` selectors
 
 ### 📝 Input Methods
 - Inline: `--query "{ users { id } }"`
-- From files: `--query-file queries/getUser.graphql`
-- As arguments: `query "{ ... }"`
+- From files: `--query-file queries/getUser.graphql` or `--subscription-file subscriptions/events.graphql`
+- As arguments: `query "{ ... }"` or `subscribe "subscription { ... }"`
 - Variables inline: `--variables '{"id":"123"}'`
 - Variables from files: `--variables-file vars.json`
 - Named operations in multi-operation files
+- Saved named operations in `.gqlcli.json` via `gqlcli op`
 
 ---
 
@@ -162,6 +168,9 @@ gqlcli query \
 gqlcli query \
   --query-file ./queries/operations.graphql \
   --operation "GetUser"
+
+# Saved named operation (from .gqlcli.json)
+gqlcli query --op get-user --variables '{"id":"123"}'
 ```
 
 ### Mutations
@@ -180,7 +189,74 @@ gqlcli mutation \
 gqlcli mutation \
   --mutation-file ./mutations/createUser.graphql \
   --variables '{"input":{"name":"Alice"}}'
+
+# Saved named mutation (from .gqlcli.json)
+gqlcli mutation --op create-user --input '{"name":"Alice","email":"alice@example.com"}'
 ```
+
+### HTTP Controls
+
+Use curl-style transport flags when scripts need one-off request customization or CI-friendly failure behavior. These flags work on HTTP-backed commands such as `query`, `mutation`, `subscribe`, `batch`, `queries`, `mutations`, `types`, and `describe`.
+
+```bash
+# Per-request headers override headers from the selected .gqlcli.json environment
+gqlcli query '{ viewer { id } }' \
+  --env prod \
+  -H 'Authorization=Bearer temporary-token' \
+  -H 'X-Tenant=acme'
+
+# Bound latency and retry transient failures
+gqlcli query '{ health }' --timeout 10 --retry 3 --retry-delay 500ms
+
+# CI: fail non-zero when the GraphQL response includes an errors array
+gqlcli query --query-file ./checks/schema.graphql --fail-on-graphql-errors
+
+# Internal/self-signed TLS endpoints
+gqlcli queries --url https://localhost:8443/graphql --insecure
+```
+
+Response metadata flags are opt-in so normal JSON output stays parseable by default:
+
+```bash
+# Include status line + headers before the body, like curl -i
+gqlcli query '{ viewer { id } }' --include-headers
+
+# Dump headers without changing stdout
+gqlcli query '{ viewer { id } }' --dump-headers headers.txt -f json | jq .data
+
+# Print selected metadata after the response
+gqlcli query '{ viewer { id } }' --metadata status-code --metadata header:X-Request-Id
+```
+
+### Subscriptions
+
+```bash
+# Stream subscription events as NDJSON envelopes
+gqlcli subscribe 'subscription { messageAdded { id text } }'
+
+# From a file, with variables
+gqlcli subscribe \
+  --subscription-file ./subscriptions/messages.graphql \
+  --variables-file ./variables.json
+
+# Named operation in a multi-operation document
+gqlcli subscribe \
+  --subscription 'subscription WatchRoom($room: ID!) { messageAdded(room: $room) { id text } }' \
+  --variables '{"room":"general"}' \
+  --operation WatchRoom
+```
+
+`subscribe` writes one JSON object per line to stdout:
+
+```jsonl
+{"type":"next","payload":{"data":{"messageAdded":{"id":"1","text":"hello"}}}}
+{"type":"error","payload":[{"message":"..."}]}
+{"type":"complete"}
+```
+
+Transport coverage: subscriptions use the standard GraphQL over WebSocket protocol (`graphql-transport-ws`). HTTP and HTTPS endpoint URLs are automatically mapped to `ws://` and `wss://`; explicit `ws://` or `wss://` URLs are also accepted. Server-Sent Events (SSE) is another common subscription transport, but is not implemented yet; it should be added as an explicit `--transport sse` mode if needed.
+
+Press Ctrl-C to cancel; gqlcli sends a WebSocket `complete` message and closes the connection cleanly.
 
 ### Batch Operations
 
@@ -298,6 +374,49 @@ gqlcli queries --env staging --url http://other-host/graphql
 
 **Priority** (lowest → highest): hardcoded default → `.gqlcli.json` env → `GRAPHQL_URL` → `--url` flag
 
+### Saved Named Operations
+
+Save frequently used queries and mutations in `.gqlcli.json`, then execute them by name with `--op`.
+
+```bash
+# Save a query with default variables
+gqlcli op save \
+  --name get-user \
+  --query 'query GetUser($id: ID!) { user(id: $id) { id name email } }' \
+  --defaults '{"id":"123"}'
+
+# Run it; explicit variables override saved defaults
+gqlcli query --op get-user --variables '{"id":"456"}'
+
+# Save and run a mutation
+gqlcli op save \
+  --name create-user \
+  --mutation 'mutation CreateUser($input: CreateUserInput!) { createUser(input: $input) { id } }'
+
+gqlcli mutation --op create-user --input '{"name":"Alice","email":"alice@example.com"}'
+
+# Manage saved operations
+gqlcli op list
+gqlcli op show --name get-user
+gqlcli op delete --name get-user
+```
+
+Saved operations are stored under the `operations` key:
+
+```json
+{
+  "operations": {
+    "get-user": {
+      "type": "query",
+      "query": "query GetUser($id: ID!) { user(id: $id) { id name email } }",
+      "defaults": { "id": "123" }
+    }
+  }
+}
+```
+
+Use `--operation` when selecting a GraphQL operation from a multi-operation document. Use `--op` when running a saved operation from `.gqlcli.json`.
+
 ### Advanced: Save Results to File
 
 ```bash
@@ -327,9 +446,19 @@ gqlcli types --output types.json
 --query-file PATH            Read query from file
 -v, --variables JSON         Query variables as JSON
 --variables-file PATH        Read variables from file
--o, --operation STRING       Named operation to execute
+-o, --operation STRING       Named operation to execute from a multi-operation document
+--op NAME                    Saved operation from .gqlcli.json
 -f, --format FORMAT          Output format
 --output FILE                Write to file
+-H, --header KEY=VALUE       Per-request HTTP header (repeatable; overrides env headers)
+--include-headers, -i        Include response status line and headers before body
+--dump-headers FILE          Write response status line and headers to file
+--metadata SELECTOR          Print selected metadata (status, status-code, headers, header:Name)
+--timeout SECONDS            Request timeout (default: 30)
+--retry N                    Retry transient failures
+--retry-delay DURATION       Delay between retries (e.g. 500ms, 2s)
+--fail-on-graphql-errors     Exit non-zero when response.errors is present
+--insecure                   Skip TLS certificate verification
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
 --env VALUE                  Environment from .gqlcli.json
 -d, --debug                  Enable HTTP debug logging
@@ -342,13 +471,51 @@ gqlcli types --output types.json
 --input JSON                 Input object (auto-wrapped as {"input":{...}})
 -v, --variables JSON         Variables as JSON
 --variables-file PATH        Read variables from file
--o, --operation STRING       Named operation
+-o, --operation STRING       Named operation to execute from a multi-operation document
+--op NAME                    Saved operation from .gqlcli.json
 -f, --format FORMAT          Output format
 --output FILE                Write to file
+-H, --header KEY=VALUE       Per-request HTTP header (repeatable; overrides env headers)
+--include-headers, -i        Include response status line and headers before body
+--dump-headers FILE          Write response status line and headers to file
+--metadata SELECTOR          Print selected metadata (status, status-code, headers, header:Name)
+--timeout SECONDS            Request timeout (default: 30)
+--retry N                    Retry transient failures
+--retry-delay DURATION       Delay between retries (e.g. 500ms, 2s)
+--fail-on-graphql-errors     Exit non-zero when response.errors is present
+--insecure                   Skip TLS certificate verification
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
 --env VALUE                  Environment from .gqlcli.json
 -d, --debug                  Enable HTTP debug logging
 ```
+
+### `subscribe` Command
+```
+-s, --subscription STRING    GraphQL subscription
+--subscription-file PATH     Read subscription from file
+-v, --variables JSON         Variables as JSON
+--variables-file PATH        Read variables from file
+-o, --operation STRING       Named operation to execute from a multi-operation document
+--op NAME                    Saved subscription from .gqlcli.json (type: "subscription")
+-H, --header KEY=VALUE       Per-request HTTP/WebSocket header (repeatable)
+--timeout SECONDS            Connection/read timeout (default: 30)
+--insecure                   Skip TLS certificate verification for wss:// endpoints
+-u, --url URL                GraphQL endpoint (env: GRAPHQL_URL); http(s) maps to ws(s)
+--env VALUE                  Environment from .gqlcli.json
+-d, --debug                  Enable debug logging
+```
+
+Output is NDJSON subscription envelopes: `next`, `error`, and `complete`.
+
+### `op` Command
+```
+gqlcli op save --name NAME (--query QUERY | --mutation MUTATION) [--defaults JSON]
+gqlcli op list
+gqlcli op show --name NAME
+gqlcli op delete --name NAME
+```
+
+Saved operations live in `.gqlcli.json` and run with `gqlcli query --op NAME` or `gqlcli mutation --op NAME`.
 
 ### `batch` Command
 ```
@@ -356,6 +523,12 @@ gqlcli types --output types.json
 --array                      Use JSON array batch transport
 --file PATH                  Read operations from file instead of stdin
 --jq EXPR                    Apply jq expression to each response (client-side)
+-H, --header KEY=VALUE       Per-request HTTP header (repeatable)
+--timeout SECONDS            Request timeout (default: 30)
+--retry N                    Retry transient failures
+--retry-delay DURATION       Delay between retries
+--fail-on-graphql-errors     Exit non-zero when any response.errors is present
+--insecure                   Skip TLS certificate verification
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
 --env VALUE                  Environment from .gqlcli.json
 -d, --debug                  Enable HTTP debug logging
@@ -551,6 +724,7 @@ This adds the following subcommands:
 | `query` | Execute a query (TOON format by default) |
 | `mutation` | Execute a mutation (JSON format by default) |
 | `batch` | Execute multiple operations from stdin (NDJSON) with jq filtering |
+| `op` | Manage saved named operations in `.gqlcli.json` |
 | `describe TYPE` | Print SDL definition of a type |
 | `types` | List all types in the schema |
 
@@ -848,6 +1022,8 @@ Built with:
 **Active Development** — Maintained and open to contributions.
 
 Latest features:
+- ✅ **GraphQL subscriptions** — `subscribe` streams `graphql-transport-ws` events as NDJSON
+- ✅ **Curl-style HTTP controls** — per-request `--header/-H`, timeout/retry/fail behavior, `--insecure`, and response metadata flags
 - ✅ **Batch operations** — execute multiple queries/mutations in one request (NDJSON + JSON array)
 - ✅ **Server-side jq filtering** — per-operation `"jq"` field for response transformation
 - ✅ **Client-side jq** — `--jq` flag applies jq to all batch responses

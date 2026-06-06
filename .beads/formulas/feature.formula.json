@@ -1,0 +1,46 @@
+{
+  "formula": "feature",
+  "version": 1,
+  "type": "workflow",
+  "vars": {
+    "name": {
+      "description": "Value for name",
+      "required": true
+    }
+  },
+  "steps": [
+    {
+      "id": "implement-new-thing",
+      "title": "Implement {{name}}",
+      "type": "task",
+      "priority": 2
+    },
+    {
+      "id": "write-tests-for-new-thing",
+      "title": "Write tests for {{name}}",
+      "type": "task",
+      "priority": 2,
+      "depends_on": [
+        "implement-new-thing"
+      ]
+    },
+    {
+      "id": "human-review-gate",
+      "title": "Human review: approve {{name}} for merge",
+      "priority": 1,
+      "gate": {"type": "human"},
+      "depends_on": [
+        "write-tests-for-new-thing"
+      ]
+    },
+    {
+      "id": "merge-new-thing-to-main",
+      "title": "Merge {{name}} to main",
+      "type": "task",
+      "priority": 2,
+      "depends_on": [
+        "human-review-gate"
+      ]
+    }
+  ]
+}

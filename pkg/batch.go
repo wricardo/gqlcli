@@ -185,6 +185,11 @@ func (b *CLIBuilder) GetBatchCommand() *cli.Command {
 				Usage:   "Enable debug mode",
 				Value:   b.config.Debug,
 			},
+			insecureFlag(),
+			&cli.IntFlag{Name: "timeout", Usage: "Request timeout in seconds (default: 30)", Value: b.config.Timeout},
+			&cli.IntFlag{Name: "retry", Usage: "Retry count for transient failures (connection errors, 408, 429, 5xx; default: 0)", Value: b.config.RetryCount},
+			&cli.DurationFlag{Name: "retry-delay", Usage: "Delay between retries (e.g. 500ms, 2s; default: 1s when --retry > 0)", Value: b.config.RetryDelay},
+			&cli.BoolFlag{Name: "fail-on-graphql-errors", Usage: "Exit non-zero when any response.errors is present", Value: b.config.FailOnGraphQLErrors},
 			&cli.BoolFlag{
 				Name:  "ndjson",
 				Usage: "Use NDJSON transport (default)",
@@ -206,6 +211,7 @@ func (b *CLIBuilder) GetBatchCommand() *cli.Command {
 				Name:  "env",
 				Usage: "Environment from .gqlcli.json",
 			},
+			headerFlag(),
 		},
 		Action: func(c *cli.Context) error {
 			if err := b.applyEnvConfig(c); err != nil {
@@ -271,7 +277,7 @@ func executeBatchNDJSON(c *cli.Context, client *HTTPClient, input io.Reader, cli
 		return err
 	}
 
-	return outputBatchResults(results, requests, clientJQ)
+	return outputBatchResults(results, requests, clientJQ, c.Bool("fail-on-graphql-errors"))
 }
 
 func executeBatchArray(c *cli.Context, client *HTTPClient, input io.Reader, clientJQ string) error {
@@ -315,12 +321,12 @@ func executeBatchArray(c *cli.Context, client *HTTPClient, input io.Reader, clie
 		return err
 	}
 
-	return outputBatchResults(results, requests, clientJQ)
+	return outputBatchResults(results, requests, clientJQ, c.Bool("fail-on-graphql-errors"))
 }
 
 // outputBatchResults applies client-side jq (if any) and prints results
 // as NDJSON (one line per value).
-func outputBatchResults(results []json.RawMessage, requests []BatchRequest, clientJQ string) error {
+func outputBatchResults(results []json.RawMessage, requests []BatchRequest, clientJQ string, failOnGraphQLErrors bool) error {
 	for i, raw := range results {
 		// Apply client-side jq if provided (overrides per-request jq for
 		// output since server already applied per-request jq).
@@ -341,6 +347,11 @@ func outputBatchResults(results []json.RawMessage, requests []BatchRequest, clie
 			}
 		}
 
+		if failOnGraphQLErrors && hasGraphQLErrors(raw) {
+			fmt.Println(string(raw))
+			return cli.Exit("", 1)
+		}
+
 		filtered, err := applyJQ(raw, jqExpr)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "jq error on result %d: %v\n", i, err)
@@ -354,6 +365,15 @@ func outputBatchResults(results []json.RawMessage, requests []BatchRequest, clie
 		}
 	}
 	return nil
+}
+
+func hasGraphQLErrors(raw json.RawMessage) bool {
+	var result map[string]interface{}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return false
+	}
+	errs, ok := result["errors"].([]interface{})
+	return ok && len(errs) > 0
 }
 
 // batchCommand returns the batch subcommand for InlineCommandSet.
@@ -434,4 +454,3 @@ func (cs *InlineCommandSet) batchCommand() *cli.Command {
 		},
 	}
 }
-

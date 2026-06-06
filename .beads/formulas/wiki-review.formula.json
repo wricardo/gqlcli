@@ -1,0 +1,71 @@
+{
+  "formula": "wiki-review",
+  "description": "Review wiki pages for accuracy, completeness, gaps, and new page opportunities. Human approval required before making changes and before pushing.",
+  "version": 1,
+  "type": "workflow",
+  "steps": [
+    {
+      "id": "audit-existing-pages",
+      "title": "Audit existing wiki pages against current code",
+      "type": "task",
+      "priority": 1,
+      "description": "For each wiki page in gqlcli.wiki/, read the page and the corresponding source code side-by-side.\n\nPages to audit:\n- Home.md — nav links, feature summary, quick start examples\n- CLI-Usage.md — command examples, flags, patterns\n- Command-Reference.md — every flag for every command\n- Configuration.md — .gqlcli.json format, env var names, precedence rules\n- Output-Formats.md — toon/json/table/llm/compact with examples\n- Batch-Operations.md — batch command flags, jq, NDJSON/JSON array transports\n- Installation.md — install instructions, go install path\n- Architecture.md — package layout, execution modes, component names\n- Library-HTTP-Mode.md — CLIBuilder API, HTTPClient interface\n- Library-Inline-Mode.md — InlineExecutor, InlineCommandSet API\n- Example-Application.md — working example still compiles and reflects current API\n- Error-Handling.md — error types, schema hints behavior\n\nFor each page record:\n- What is outdated or wrong (flag names changed, types renamed, behavior different)\n- What is missing (new flags/features added since the page was written)\n- What examples are broken or misleading\n\nWrite findings as notes on this issue. Do NOT edit pages yet — just record findings."
+    },
+    {
+      "id": "gap-analysis",
+      "title": "Identify undocumented features and new page opportunities",
+      "type": "task",
+      "priority": 1,
+      "description": "Scan the codebase for features, flags, and behaviors not covered in any wiki page.\n\nSources to scan:\n- pkg/*.go — all exported types, interfaces, functions, and CLI commands\n- cmd/gqlcli/main.go — entry point, any top-level flags\n- CLAUDE.md — patterns and behaviors documented for AI agents\n- README.md — anything in README not in the wiki\n- Git log since last wiki push — new commits may have added undocumented features\n\nIdentify:\n1. New pages that should exist (e.g. if a major feature has no page)\n2. New sections that should be added to existing pages\n3. Patterns that are worth documenting (e.g. common usage with AI agents, piping output)\n\nWrite findings as a list on this issue. Prioritize by user impact.",
+      "depends_on": ["audit-existing-pages"]
+    },
+    {
+      "id": "approve-changes-gate",
+      "title": "Human approval: review findings before making changes",
+      "priority": 0,
+      "gate": {"type": "human"},
+      "description": "Review the audit and gap analysis findings before any wiki pages are modified or created.\n\nRead the notes on the two preceding issues:\n- 'Audit existing wiki pages' — what is outdated or wrong\n- 'Identify undocumented features' — proposed new pages and sections\n\nDecide:\n- Which updates are worth making vs too risky or out of scope\n- Which new pages to actually create (vs close create-new-pages with 'not needed')\n- Any scope constraints to pass as notes before unblocking\n\nWhen ready: `bd gate resolve <this-gate-id>`",
+      "depends_on": ["gap-analysis"]
+    },
+    {
+      "id": "update-existing-pages",
+      "title": "Update existing wiki pages based on audit findings",
+      "type": "task",
+      "priority": 2,
+      "description": "Apply all findings from the audit step to the existing pages in gqlcli.wiki/.\n\nFor each finding:\n- Fix outdated flag names, type names, or behavior descriptions\n- Add missing flags, options, or features\n- Fix broken examples — test them if possible\n- Remove or correct misleading information\n\nWork through pages roughly in order of user-facing importance:\n1. Command-Reference.md (most likely to drift)\n2. Configuration.md\n3. CLI-Usage.md\n4. Output-Formats.md\n5. Batch-Operations.md\n6. Architecture.md\n7. Library-HTTP-Mode.md + Library-Inline-Mode.md\n8. Example-Application.md\n9. Error-Handling.md\n10. Installation.md\n\nCommit as you go: `cd gqlcli.wiki && git add -A && git commit -m 'update: <page>'`",
+      "depends_on": ["approve-changes-gate"]
+    },
+    {
+      "id": "create-new-pages",
+      "title": "Write new wiki pages identified in gap analysis",
+      "type": "task",
+      "priority": 2,
+      "description": "For each new page approved in the human review gate, create it in gqlcli.wiki/.\n\nStructure for a new page:\n1. Short intro — what this covers and who it's for\n2. Conceptual overview — how it works\n3. Usage examples — concrete, runnable\n4. Reference section — complete flag/option list if applicable\n5. Common patterns or gotchas\n\nNaming: use PascalCase-with-hyphens matching existing pages (e.g. Token-Management.md).\n\nCommit each new page: `cd gqlcli.wiki && git add <Page>.md && git commit -m 'add: <Page> page'`\n\nIf no new pages were approved, close this issue with reason 'no new pages approved'.",
+      "depends_on": ["approve-changes-gate"]
+    },
+    {
+      "id": "update-home",
+      "title": "Update Home.md nav and feature summary",
+      "type": "task",
+      "priority": 2,
+      "description": "Update gqlcli.wiki/Home.md to reflect all changes made:\n\n1. Add [[links]] for any new pages created\n2. Remove or update links for pages that were restructured\n3. Update the feature summary and quick-start examples if the CLI interface changed\n4. Verify every [[WikiLink]] in Home.md resolves to a real file\n\nCommit: `cd gqlcli.wiki && git add Home.md && git commit -m 'update: Home nav and summary'`",
+      "depends_on": ["update-existing-pages", "create-new-pages"]
+    },
+    {
+      "id": "human-review-gate",
+      "title": "Human review: approve wiki changes before push",
+      "priority": 0,
+      "gate": {"type": "human"},
+      "description": "Review all wiki changes before they are pushed to the remote.\n\nCheck:\n- `cd gqlcli.wiki && git log --oneline origin/master..HEAD` — see all commits to be pushed\n- `cd gqlcli.wiki && git diff origin/master..HEAD` — full diff\n- Spot-check a few pages in the GitHub wiki preview if desired\n\nIf changes look good: `bd gate resolve <this-gate-id>`\nIf changes need revision: add a comment on this issue, reopen update steps as needed.",
+      "depends_on": ["update-home"]
+    },
+    {
+      "id": "push-wiki",
+      "title": "Push wiki changes to remote",
+      "type": "task",
+      "priority": 1,
+      "description": "Push all wiki commits to the remote.\n\n```bash\ncd gqlcli.wiki\ngit pull --rebase\ngit push\n```\n\nIf push fails due to remote divergence, resolve with `git pull --rebase` and retry.\nAfter push, verify changes are visible on the GitHub wiki.",
+      "depends_on": ["human-review-gate"]
+    }
+  ]
+}

@@ -54,6 +54,7 @@ func (b *CLIBuilder) GetLoginCommand() *cli.Command {
 				Usage: "Value prefix prepended to the token",
 				Value: "Bearer",
 			},
+			insecureFlag(),
 		},
 		Action: func(c *cli.Context) error {
 			envName := c.String("env")
@@ -97,7 +98,7 @@ func (b *CLIBuilder) GetLoginCommand() *cli.Command {
 			}
 
 			// Execute mutation
-			client := NewHTTPClient(&Config{URL: env.URL})
+			client := NewHTTPClient(&Config{URL: env.URL, Insecure: c.Bool("insecure")})
 			result, err := client.ExecuteMutation(context.Background(), ExecutionModeHTTP, MutationOptions{
 				Mutation:  mutation,
 				Variables: variables,

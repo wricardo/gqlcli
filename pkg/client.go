@@ -2,8 +2,10 @@ package gqlcli
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"time"
@@ -32,9 +34,10 @@ func extractTypeFromErrorMsg(msg string) string {
 
 // HTTPClient is a GraphQL client that executes operations via HTTP
 type HTTPClient struct {
-	config    *Config
-	client    *resty.Client
-	describer *Describer
+	config               *Config
+	client               *resty.Client
+	describer            *Describer
+	lastResponseMetadata *ResponseMetadata
 }
 
 func (c *HTTPClient) getDescriber() *Describer {
@@ -52,6 +55,29 @@ func NewHTTPClient(cfg *Config) *HTTPClient {
 	}
 
 	restClient := resty.New().SetTimeout(timeout)
+	if cfg.RetryCount > 0 {
+		retryDelay := cfg.RetryDelay
+		if retryDelay == 0 {
+			retryDelay = time.Second
+		}
+		restClient.
+			SetRetryCount(cfg.RetryCount).
+			SetRetryWaitTime(retryDelay).
+			AddRetryCondition(func(resp *resty.Response, err error) bool {
+				if err != nil {
+					return true
+				}
+				if resp == nil {
+					return false
+				}
+				status := resp.StatusCode()
+				return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= http.StatusInternalServerError
+			})
+	}
+
+	if cfg.Insecure {
+		restClient.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true})
+	}
 
 	// Enable debug mode if configured
 	if cfg.Debug {
@@ -72,6 +98,16 @@ func NewHTTPClient(cfg *Config) *HTTPClient {
 		config: cfg,
 		client: restClient,
 	}
+}
+
+// LastResponseMetadata returns metadata from the most recent HTTP response.
+func (c *HTTPClient) LastResponseMetadata() *ResponseMetadata {
+	if c.lastResponseMetadata == nil {
+		return nil
+	}
+	meta := *c.lastResponseMetadata
+	meta.Headers = c.lastResponseMetadata.Headers.Clone()
+	return &meta
 }
 
 // Execute runs a GraphQL query via HTTP
@@ -178,6 +214,8 @@ func (c *HTTPClient) Introspect(ctx context.Context) (map[string]interface{}, er
 
 // executeOperation is the internal method that handles request/response
 func (c *HTTPClient) executeOperation(ctx context.Context, query string, variables map[string]interface{}, operationName string) (map[string]interface{}, error) {
+	c.lastResponseMetadata = nil
+
 	// Validate URL
 	if c.config.URL == "" {
 		return nil, fmt.Errorf("GraphQL URL is not configured")
@@ -208,6 +246,7 @@ func (c *HTTPClient) executeOperation(ctx context.Context, query string, variabl
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
+	c.lastResponseMetadata = responseMetadataFromResty(resp)
 
 	// Parse response
 	var result map[string]interface{}
@@ -215,10 +254,12 @@ func (c *HTTPClient) executeOperation(ctx context.Context, query string, variabl
 		return nil, fmt.Errorf("failed to parse response: %w\nBody: %s", err, string(resp.Body()))
 	}
 
-	// Check for errors in response; enrich with schema hints and return as typed error.
-	if rawErrors, ok := result["errors"].([]interface{}); ok {
+	// Check for errors in response; enrich with schema hints and optionally return as typed error.
+	if rawErrors, ok := result["errors"].([]interface{}); ok && len(rawErrors) > 0 {
 		c.enrichErrors(ctx, rawErrors)
-		return result, &GraphQLResponseError{Response: result, Query: query}
+		if c.config.FailOnGraphQLErrors {
+			return result, &GraphQLResponseError{Response: result, Query: query}
+		}
 	}
 
 	return result, nil

@@ -8,7 +8,7 @@ import (
 	gqlcli "github.com/wricardo/gqlcli/pkg"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 func main() {
 	cfg := &gqlcli.Config{
@@ -23,7 +23,7 @@ func main() {
 		Name:    "gqlcli",
 		Usage:   "GraphQL CLI — Query and explore any GraphQL API",
 		Version: version,
-		Description: `gqlcli executes GraphQL queries and mutations, and explores schemas from any GraphQL endpoint.
+		Description: `gqlcli executes GraphQL queries, mutations, and subscriptions, and explores schemas from any GraphQL endpoint.
 
 TYPICAL AI WORKFLOW
   1. Discover available operations:
@@ -41,6 +41,7 @@ TYPICAL AI WORKFLOW
        gqlcli mutation 'mutation { deleteUser(id:"1") { ok } }'
        gqlcli mutation 'mutation CreateUser($input: CreateUserInput!) { createUser(input: $input) { id } }' \
          --input '{"name":"Alice","email":"alice@example.com"}'
+       gqlcli subscribe 'subscription { messageAdded { id text } }'
 
   4. Filter output with jq (use --format json first):
        gqlcli query '{ users { id name } }' --format json | jq '.data.users[].name'

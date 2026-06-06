@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
 
 	"github.com/urfave/cli/v2"
@@ -45,8 +46,9 @@ func NewCLIBuilder(cfg *Config) *CLIBuilder {
 }
 
 // applyEnvConfig applies the selected environment from .gqlcli.json to b.config,
-// then lets explicit CLI flags (--url, --debug) override it.
+// then lets explicit CLI flags (--url, --debug, --insecure) override it.
 func (b *CLIBuilder) applyEnvConfig(c *cli.Context) error {
+	mergedHeaders := make(map[string]string)
 	if b.projectConfig != nil {
 		env, err := b.projectConfig.Resolve(c.String("env"))
 		if err != nil {
@@ -56,15 +58,57 @@ func (b *CLIBuilder) applyEnvConfig(c *cli.Context) error {
 			if env.URL != "" {
 				b.config.URL = env.URL
 			}
-			b.config.Headers = env.Headers
+			for k, v := range env.Headers {
+				mergedHeaders[k] = v
+			}
 		}
 	}
+
+	cliHeaders, err := parseHeaders(c.StringSlice("header"))
+	if err != nil {
+		return err
+	}
+	for k, v := range cliHeaders {
+		mergedHeaders[k] = v
+	}
+	if len(mergedHeaders) > 0 {
+		b.config.Headers = mergedHeaders
+	} else {
+		b.config.Headers = nil
+	}
+
 	// Explicit --url / GRAPHQL_URL env var overrides project config
 	if c.IsSet("url") {
 		b.config.URL = c.String("url")
 	}
 	b.config.Debug = c.Bool("debug")
+	b.config.Insecure = c.Bool("insecure")
+	if c.IsSet("timeout") {
+		b.config.Timeout = c.Int("timeout")
+	}
+	if c.IsSet("retry") {
+		b.config.RetryCount = c.Int("retry")
+	}
+	if c.IsSet("retry-delay") {
+		b.config.RetryDelay = c.Duration("retry-delay")
+	}
+	b.config.FailOnGraphQLErrors = c.Bool("fail-on-graphql-errors")
 	return nil
+}
+
+func headerFlag() cli.Flag {
+	return &cli.StringSliceFlag{
+		Name:    "header",
+		Aliases: []string{"H"},
+		Usage:   "HTTP header as KEY=VALUE (repeatable)",
+	}
+}
+
+func insecureFlag() cli.Flag {
+	return &cli.BoolFlag{
+		Name:  "insecure",
+		Usage: "Skip TLS certificate verification (for self-signed/internal endpoints)",
+	}
 }
 
 // GetQueryCommand returns the query subcommand
@@ -199,6 +243,62 @@ func (b *CLIBuilder) GetMutationCommand() *cli.Command {
 }
 
 // GetDescribeCommand returns the describe command
+// GetSubscribeCommand returns the subscribe subcommand
+func (b *CLIBuilder) GetSubscribeCommand() *cli.Command {
+	return &cli.Command{
+		Name:    "subscribe",
+		Aliases: []string{"sub", "s"},
+		Usage:   "Execute a GraphQL subscription",
+		Description: "Execute a streaming GraphQL subscription using the standard graphql-transport-ws WebSocket protocol.\n\n" +
+			"Subscription source (pick one): --subscription flag, --subscription-file, or first positional argument.\n" +
+			"Variables: --variables '{\"id\":\"123\"}' (inline JSON) or --variables-file vars.json.\n" +
+			"Each received event is written to stdout as one NDJSON line:\n" +
+			"  {\"type\":\"next\",\"payload\":{...}}\n" +
+			"  {\"type\":\"error\",\"payload\":...}\n" +
+			"  {\"type\":\"complete\"}\n\n" +
+			"Transport notes: this command supports WebSocket GraphQL over WebSocket (graphql-transport-ws).\n" +
+			"SSE-based subscriptions are a common alternative for servers that expose subscriptions over HTTP event streams;\n" +
+			"SSE is not implemented yet and should be added as an explicit --transport option if needed.\n\n" +
+			"Examples:\n" +
+			"  gqlcli subscribe 'subscription { messageAdded { id text } }'\n" +
+			"  gqlcli subscribe --subscription-file ./sub.graphql --variables-file vars.json\n" +
+			"  gqlcli subscribe --subscription 'subscription Watch($room:ID!){ messageAdded(room:$room){ text } }' --variables '{\"room\":\"general\"}'",
+		Flags: b.getSubscriptionFlags(),
+		Action: func(c *cli.Context) error {
+			if err := b.applyEnvConfig(c); err != nil {
+				return err
+			}
+			b.client = NewHTTPClient(b.config)
+
+			subscription, err := b.getSubscriptionString(c)
+			if err != nil {
+				return err
+			}
+
+			variables, err := b.getVariables(c)
+			if err != nil {
+				return err
+			}
+
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+			defer stop()
+
+			enc := json.NewEncoder(os.Stdout)
+			subClient, ok := b.client.(*HTTPClient)
+			if !ok {
+				return fmt.Errorf("subscribe requires an HTTP/WebSocket client")
+			}
+			return subClient.Subscribe(ctx, SubscriptionOptions{
+				Subscription:  subscription,
+				Variables:     variables,
+				OperationName: c.String("operation"),
+			}, func(event SubscriptionEvent) error {
+				return enc.Encode(event)
+			})
+		},
+	}
+}
+
 func (b *CLIBuilder) GetDescribeCommand() *cli.Command {
 	return &cli.Command{
 		Name:        "describe",
@@ -220,6 +320,11 @@ func (b *CLIBuilder) GetDescribeCommand() *cli.Command {
 				Usage:   "Enable debug mode (logs HTTP requests/responses)",
 				Value:   b.config.Debug,
 			},
+			insecureFlag(),
+			&cli.IntFlag{Name: "timeout", Usage: "Request timeout in seconds (default: 30)", Value: b.config.Timeout},
+			&cli.IntFlag{Name: "retry", Usage: "Retry count for transient failures (connection errors, 408, 429, 5xx; default: 0)", Value: b.config.RetryCount},
+			&cli.DurationFlag{Name: "retry-delay", Usage: "Delay between retries (e.g. 500ms, 2s; default: 1s when --retry > 0)", Value: b.config.RetryDelay},
+			&cli.BoolFlag{Name: "fail-on-graphql-errors", Usage: "Exit non-zero when response.errors is present", Value: b.config.FailOnGraphQLErrors},
 			&cli.BoolFlag{
 				Name:    "args",
 				Aliases: []string{"a"},
@@ -233,6 +338,7 @@ func (b *CLIBuilder) GetDescribeCommand() *cli.Command {
 				Name:  "env",
 				Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
 			},
+			headerFlag(),
 		},
 		Action: func(c *cli.Context) error {
 			if err := b.applyEnvConfig(c); err != nil {
@@ -287,6 +393,11 @@ func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 				Usage:   "Enable debug mode (logs HTTP requests/responses)",
 				Value:   b.config.Debug,
 			},
+			insecureFlag(),
+			&cli.IntFlag{Name: "timeout", Usage: "Request timeout in seconds (default: 30)", Value: b.config.Timeout},
+			&cli.IntFlag{Name: "retry", Usage: "Retry count for transient failures (connection errors, 408, 429, 5xx; default: 0)", Value: b.config.RetryCount},
+			&cli.DurationFlag{Name: "retry-delay", Usage: "Delay between retries (e.g. 500ms, 2s; default: 1s when --retry > 0)", Value: b.config.RetryDelay},
+			&cli.BoolFlag{Name: "fail-on-graphql-errors", Usage: "Exit non-zero when response.errors is present", Value: b.config.FailOnGraphQLErrors},
 			&cli.StringFlag{
 				Name:  "filter",
 				Usage: "Filter types by name (case-insensitive substring match)",
@@ -306,6 +417,7 @@ func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 				Name:  "env",
 				Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
 			},
+			headerFlag(),
 		},
 		Action: func(c *cli.Context) error {
 			if err := b.applyEnvConfig(c); err != nil {
@@ -405,6 +517,11 @@ func (b *CLIBuilder) GetQueriesCommand() *cli.Command {
 				Usage:   "Enable debug mode (logs HTTP requests/responses)",
 				Value:   b.config.Debug,
 			},
+			insecureFlag(),
+			&cli.IntFlag{Name: "timeout", Usage: "Request timeout in seconds (default: 30)", Value: b.config.Timeout},
+			&cli.IntFlag{Name: "retry", Usage: "Retry count for transient failures (connection errors, 408, 429, 5xx; default: 0)", Value: b.config.RetryCount},
+			&cli.DurationFlag{Name: "retry-delay", Usage: "Delay between retries (e.g. 500ms, 2s; default: 1s when --retry > 0)", Value: b.config.RetryDelay},
+			&cli.BoolFlag{Name: "fail-on-graphql-errors", Usage: "Exit non-zero when response.errors is present", Value: b.config.FailOnGraphQLErrors},
 			&cli.BoolFlag{
 				Name:  "desc",
 				Usage: "Include field descriptions",
@@ -427,6 +544,7 @@ func (b *CLIBuilder) GetQueriesCommand() *cli.Command {
 				Name:  "env",
 				Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
 			},
+			headerFlag(),
 		},
 		Action: func(c *cli.Context) error {
 			if err := b.applyEnvConfig(c); err != nil {
@@ -512,6 +630,11 @@ func (b *CLIBuilder) GetMutationsCommand() *cli.Command {
 				Usage:   "Enable debug mode (logs HTTP requests/responses)",
 				Value:   b.config.Debug,
 			},
+			insecureFlag(),
+			&cli.IntFlag{Name: "timeout", Usage: "Request timeout in seconds (default: 30)", Value: b.config.Timeout},
+			&cli.IntFlag{Name: "retry", Usage: "Retry count for transient failures (connection errors, 408, 429, 5xx; default: 0)", Value: b.config.RetryCount},
+			&cli.DurationFlag{Name: "retry-delay", Usage: "Delay between retries (e.g. 500ms, 2s; default: 1s when --retry > 0)", Value: b.config.RetryDelay},
+			&cli.BoolFlag{Name: "fail-on-graphql-errors", Usage: "Exit non-zero when response.errors is present", Value: b.config.FailOnGraphQLErrors},
 			&cli.BoolFlag{
 				Name:  "desc",
 				Usage: "Include field descriptions",
@@ -534,6 +657,7 @@ func (b *CLIBuilder) GetMutationsCommand() *cli.Command {
 				Name:  "env",
 				Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
 			},
+			headerFlag(),
 		},
 		Action: func(c *cli.Context) error {
 			if err := b.applyEnvConfig(c); err != nil {
@@ -596,6 +720,7 @@ func (b *CLIBuilder) RegisterCommands(app *cli.App) {
 	app.Commands = append(app.Commands,
 		b.GetQueryCommand(),
 		b.GetMutationCommand(),
+		b.GetSubscribeCommand(),
 		b.GetBatchCommand(),
 		b.GetTypesCommand(),
 		b.GetDescribeCommand(),
@@ -611,6 +736,23 @@ func (b *CLIBuilder) RegisterCommands(app *cli.App) {
 
 // Helper methods
 
+func (b *CLIBuilder) getSubscriptionFlags() []cli.Flag {
+	flags := b.getOperationFlags()
+	flags = append(flags,
+		&cli.StringFlag{
+			Name:     "subscription",
+			Aliases:  []string{"s"},
+			Usage:    "GraphQL subscription string",
+			Required: false,
+		},
+		&cli.StringFlag{
+			Name:  "subscription-file",
+			Usage: "Path to .graphql file containing subscription",
+		},
+	)
+	return flags
+}
+
 func (b *CLIBuilder) getOperationFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
@@ -625,6 +767,27 @@ func (b *CLIBuilder) getOperationFlags() []cli.Flag {
 			Aliases: []string{"d"},
 			Usage:   "Enable debug mode (logs HTTP requests/responses)",
 			Value:   b.config.Debug,
+		},
+		insecureFlag(),
+		&cli.IntFlag{
+			Name:  "timeout",
+			Usage: "Request timeout in seconds (default: 30)",
+			Value: b.config.Timeout,
+		},
+		&cli.IntFlag{
+			Name:  "retry",
+			Usage: "Retry count for transient failures (connection errors, 408, 429, 5xx; default: 0)",
+			Value: b.config.RetryCount,
+		},
+		&cli.DurationFlag{
+			Name:  "retry-delay",
+			Usage: "Delay between retries (e.g. 500ms, 2s; default: 1s when --retry > 0)",
+			Value: b.config.RetryDelay,
+		},
+		&cli.BoolFlag{
+			Name:  "fail-on-graphql-errors",
+			Usage: "Exit non-zero when response.errors is present",
+			Value: b.config.FailOnGraphQLErrors,
 		},
 		&cli.StringFlag{
 			Name:     "query",
@@ -678,6 +841,19 @@ func (b *CLIBuilder) getOperationFlags() []cli.Flag {
 			Name:  "output",
 			Usage: "Output file path (default: stdout)",
 		},
+		&cli.BoolFlag{
+			Name:    "include-headers",
+			Aliases: []string{"i"},
+			Usage:   "Include HTTP response status line and headers before the response body (breaks pure JSON output)",
+		},
+		&cli.StringFlag{
+			Name:  "dump-headers",
+			Usage: "Write HTTP response status line and headers to a file without changing response output",
+		},
+		&cli.StringSliceFlag{
+			Name:  "metadata",
+			Usage: "Print selected response metadata after the response (repeatable: status, status-code, headers, header:Name)",
+		},
 		&cli.StringFlag{
 			Name:  "env",
 			Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
@@ -686,6 +862,7 @@ func (b *CLIBuilder) getOperationFlags() []cli.Flag {
 			Name:  "op",
 			Usage: "Named operation from .gqlcli.json (provides query/mutation string + default variables)",
 		},
+		headerFlag(),
 	}
 }
 
@@ -722,6 +899,52 @@ func (b *CLIBuilder) getQueryString(c *cli.Context) (string, error) {
 	}
 
 	return "", fmt.Errorf("query is required (use --query, --query-file, --op, or provide as argument)")
+}
+
+func (b *CLIBuilder) getSubscriptionString(c *cli.Context) (string, error) {
+	if subscriptionFile := c.String("subscription-file"); subscriptionFile != "" {
+		data, err := os.ReadFile(subscriptionFile)
+		if err != nil {
+			return "", fmt.Errorf("failed to read subscription file: %w", err)
+		}
+		return string(data), nil
+	}
+
+	if subscription := c.String("subscription"); subscription != "" {
+		return subscription, nil
+	}
+
+	if query := c.String("query"); query != "" {
+		return query, nil
+	}
+
+	if queryFile := c.String("query-file"); queryFile != "" {
+		data, err := os.ReadFile(queryFile)
+		if err != nil {
+			return "", fmt.Errorf("failed to read query file: %w", err)
+		}
+		return string(data), nil
+	}
+
+	if c.NArg() > 0 {
+		return c.Args().First(), nil
+	}
+
+	if opName := c.String("op"); opName != "" {
+		if b.projectConfig == nil {
+			return "", fmt.Errorf("--op requires .gqlcli.json")
+		}
+		op, ok := b.projectConfig.Operations[opName]
+		if !ok {
+			return "", fmt.Errorf("operation %q not found in .gqlcli.json", opName)
+		}
+		if op.Type != "subscription" {
+			return "", fmt.Errorf("operation %q is a %s, not a subscription; use the %s command", opName, op.Type, op.Type)
+		}
+		return op.Query, nil
+	}
+
+	return "", fmt.Errorf("subscription is required (use --subscription, --subscription-file, --query, --query-file, --op, or provide as argument)")
 }
 
 func (b *CLIBuilder) getMutationString(c *cli.Context) (string, error) {
@@ -813,6 +1036,13 @@ func (b *CLIBuilder) handleError(c *cli.Context, err error) error {
 }
 
 func (b *CLIBuilder) outputResult(c *cli.Context, result map[string]interface{}) error {
+	meta := b.client.LastResponseMetadata()
+	if dumpHeadersFile := c.String("dump-headers"); dumpHeadersFile != "" {
+		if err := os.WriteFile(dumpHeadersFile, []byte(formatResponseHeaders(meta)), 0644); err != nil {
+			return fmt.Errorf("writing response headers: %w", err)
+		}
+	}
+
 	// Get formatter
 	formatName := c.String("format")
 	formatter, err := b.formatReg.Get(formatName)
@@ -827,12 +1057,21 @@ func (b *CLIBuilder) outputResult(c *cli.Context, result map[string]interface{})
 		return err
 	}
 
+	if c.Bool("include-headers") {
+		output = formatResponseHeaders(meta) + output
+	}
+	if metadataOutput, err := formatSelectedResponseMetadata(meta, c.StringSlice("metadata")); err != nil {
+		return err
+	} else if metadataOutput != "" {
+		output += "\n" + metadataOutput
+	}
+
 	// Write to file or stdout
 	if outputFile := c.String("output"); outputFile != "" {
 		return os.WriteFile(outputFile, []byte(output), 0644)
 	}
 
-	fmt.Println(output)
+	fmt.Fprintln(c.App.Writer, output)
 	return nil
 }
 

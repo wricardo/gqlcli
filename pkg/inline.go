@@ -155,6 +155,6 @@ type inlineRecorder struct {
 	status int
 }
 
-func (r *inlineRecorder) Header() http.Header        { return r.header }
+func (r *inlineRecorder) Header() http.Header         { return r.header }
 func (r *inlineRecorder) Write(b []byte) (int, error) { return r.body.Write(b) }
-func (r *inlineRecorder) WriteHeader(s int)            { r.status = s }
+func (r *inlineRecorder) WriteHeader(s int)           { r.status = s }

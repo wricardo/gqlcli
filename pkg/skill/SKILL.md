@@ -64,6 +64,25 @@ gqlcli mutation \
   --variables '{"input":{"name":"Alice"}}'
 ```
 
+## Subscribe to events
+
+Subscriptions use the GraphQL over WebSocket protocol (`graphql-transport-ws`) and stream NDJSON envelopes. HTTP(S) endpoint URLs are automatically mapped to WS(S).
+
+```bash
+gqlcli subscribe 'subscription { messageAdded { id text } }'
+
+gqlcli subscribe \
+  --subscription-file ./messages.graphql \
+  --variables-file ./vars.json
+
+gqlcli subscribe \
+  --subscription 'subscription Watch($room:ID!){ messageAdded(room:$room){ id text } }' \
+  --variables '{"room":"general"}' \
+  --operation Watch
+```
+
+Output is one JSON object per line: `next`, `error`, and `complete`. Press Ctrl-C to cancel cleanly.
+
 ## Named operations (save and reuse)
 
 Save a query or mutation by name to avoid repeating it. Stored in `.gqlcli.json` under `"operations"`.
@@ -89,7 +108,7 @@ gqlcli mutation --op create-user --input '{"name":"Alice"}'
 gqlcli mutation --op create-user --env prod --input '{"name":"Alice"}'
 ```
 
-`--op` is available on both `query` and `mutation` commands. Using a mutation-type op with `query` (or vice versa) returns an error.
+`--op` is available on `query`, `mutation`, and `subscribe` commands. Using the wrong operation type returns an error. Subscription operations can also be stored manually in `.gqlcli.json` with `"type": "subscription"`.
 
 ## Batch operations
 
@@ -125,6 +144,31 @@ gqlcli query '{ users { id status } }' --format json \
 gqlcli query '{ users { id name } }' --format json | jq '.data.users[].name'
 gqlcli query '{ users { id } }' --format json | jq '.data.users | length'
 ```
+
+## HTTP controls
+
+Use these instead of dropping to curl when you need transport-level control:
+
+```bash
+# One-off headers; CLI headers override .gqlcli.json env headers
+gqlcli query '{ viewer { id } }' --env prod \
+  -H 'Authorization=Bearer temp-token' \
+  -H 'X-Tenant=acme'
+
+# Reliability / CI
+gqlcli query '{ health }' --timeout 10 --retry 3 --retry-delay 500ms
+gqlcli query --query-file ./check.graphql --fail-on-graphql-errors
+
+# Self-signed/internal TLS
+gqlcli queries --url https://localhost:8443/graphql --insecure
+
+# Response metadata
+gqlcli query '{ viewer { id } }' --include-headers
+gqlcli query '{ viewer { id } }' --dump-headers headers.txt -f json
+gqlcli query '{ viewer { id } }' --metadata status-code --metadata header:X-Request-Id
+```
+
+`--header/-H`, `--timeout`, `--retry`, `--retry-delay`, `--fail-on-graphql-errors`, and `--insecure` apply to HTTP-backed commands (`query`, `mutation`, `subscribe`, `batch`, `queries`, `mutations`, `types`, `describe`). Metadata flags apply to single response operations.
 
 ## Output formats
 
@@ -192,6 +236,11 @@ Custom header name or prefix: `--header X-Auth-Token --prefix ""`.
 ## Other flags
 
 ```bash
---debug     # log HTTP request/response
---env NAME  # select environment from .gqlcli.json (e.g. local, prod)
+--debug                      # log HTTP request/response
+--env NAME                   # select environment from .gqlcli.json (e.g. local, prod)
+--header 'Key=Value' / -H    # add/override a per-request header
+--timeout 10                 # request timeout in seconds
+--retry 3 --retry-delay 1s   # retry transient failures
+--fail-on-graphql-errors     # exit non-zero when response.errors is present
+--insecure                   # skip TLS certificate verification
 ```

@@ -42,8 +42,8 @@ func parseHeaders(pairs []string) (map[string]string, error) {
 	headers := make(map[string]string, len(pairs))
 	for _, pair := range pairs {
 		parts := strings.SplitN(pair, "=", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid --header %q: must be KEY=VALUE", pair)
+		if len(parts) != 2 || parts[0] == "" {
+			return nil, fmt.Errorf("invalid --header %q: must be KEY=VALUE with a non-empty KEY", pair)
 		}
 		headers[parts[0]] = parts[1]
 	}

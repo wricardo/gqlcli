@@ -1,6 +1,10 @@
 package gqlcli
 
-import "context"
+import (
+	"context"
+	"net/http"
+	"time"
+)
 
 // Config holds the CLI configuration
 type Config struct {
@@ -13,9 +17,13 @@ type Config struct {
 	Auth  AuthConfig
 
 	// HTTP client settings
-	Timeout int               // Request timeout in seconds (default: 30)
-	Debug   bool              // Enable debug logging (logs requests/responses)
-	Headers map[string]string // Custom HTTP headers sent with every request
+	Timeout             int               // Request timeout in seconds (default: 30)
+	RetryCount          int               // Number of retries for transient request failures (default: 0)
+	RetryDelay          time.Duration     // Delay between retries (default: 1s when retries are enabled)
+	FailOnGraphQLErrors bool              // Return an error when response.errors is present
+	Debug               bool              // Enable debug logging (logs requests/responses)
+	Insecure            bool              // Skip TLS certificate verification (default: false)
+	Headers             map[string]string // Custom HTTP headers sent with every request
 }
 
 // AuthConfig holds authentication configuration
@@ -69,6 +77,14 @@ type GraphQLResponseError struct {
 
 func (e *GraphQLResponseError) Error() string { return "GraphQL errors in response" }
 
+// ResponseMetadata captures HTTP response details from the most recent request.
+type ResponseMetadata struct {
+	Status     string
+	StatusCode int
+	Proto      string
+	Headers    http.Header
+}
+
 // ExecutionMode determines how the query is executed
 type ExecutionMode int
 
@@ -82,6 +98,7 @@ type Client interface {
 	Execute(ctx context.Context, mode ExecutionMode, opts QueryOptions) (map[string]interface{}, error)
 	ExecuteMutation(ctx context.Context, mode ExecutionMode, opts MutationOptions) (map[string]interface{}, error)
 	Introspect(ctx context.Context) (map[string]interface{}, error)
+	LastResponseMetadata() *ResponseMetadata
 }
 
 // Formatter formats query results
