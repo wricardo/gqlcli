@@ -3,12 +3,21 @@ package main
 import (
 	"log"
 	"os"
+	"strings"
 
 	"github.com/urfave/cli/v2"
 	gqlcli "github.com/wricardo/gqlcli/pkg"
 )
 
-const version = "0.2.0"
+// Version is set at build time via -ldflags "-X main.Version=<value>".
+var Version = "dev"
+
+func cliVersion() string {
+	if strings.TrimSpace(Version) == "" {
+		return "dev"
+	}
+	return Version
+}
 
 func main() {
 	cfg := &gqlcli.Config{
@@ -22,7 +31,7 @@ func main() {
 	app := &cli.App{
 		Name:    "gqlcli",
 		Usage:   "GraphQL CLI — Query and explore any GraphQL API",
-		Version: version,
+		Version: cliVersion(),
 		Description: `gqlcli executes GraphQL queries, mutations, and subscriptions, and explores schemas from any GraphQL endpoint.
 
 TYPICAL AI WORKFLOW

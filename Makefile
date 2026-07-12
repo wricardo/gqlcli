@@ -11,7 +11,8 @@ INSTALL_PATH := $(INSTALL_DIR)/$(BINARY_NAME)
 # Go settings
 GO := go
 GOFLAGS := -v
-LDFLAGS := -ldflags "-X main.Version=dev"
+VERSION ?= $(shell git describe --tags --always --dirty)
+LDFLAGS := -ldflags "-X main.Version=$(VERSION)"
 
 # Colors for output
 GREEN := \033[0;32m
@@ -37,7 +38,7 @@ help: ## Show this help message
 build: ## Build the CLI binary
 	@echo "$(BLUE)Building $(BINARY_NAME)...$(NC)"
 	@mkdir -p bin
-	@$(GO) build $(GOFLAGS) -o $(BINARY_PATH) $(CMD_PATH)
+	@$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BINARY_PATH) $(CMD_PATH)
 	@echo "$(GREEN)✓ Built successfully: $(BINARY_PATH)$(NC)"
 
 install: ## Install the CLI to /usr/local/bin
@@ -45,7 +46,7 @@ install: ## Install the CLI to /usr/local/bin
 	@if command -v go >/dev/null 2>&1; then \
 		echo "Using 'go build' and installing to $(INSTALL_PATH)"; \
 		mkdir -p bin; \
-		$(GO) build $(GOFLAGS) -o $(BINARY_PATH) $(CMD_PATH); \
+		$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BINARY_PATH) $(CMD_PATH); \
 	else \
 		echo "$(YELLOW)Go not found in PATH; installing existing $(BINARY_PATH)...$(NC)"; \
 		test -f $(BINARY_PATH) || { echo "$(YELLOW)$(BINARY_PATH) not found; install Go or run 'make build' first.$(NC)"; exit 1; }; \
