@@ -32,10 +32,41 @@ gqlcli mutations --filter campaign
 gqlcli types                            # all types
 gqlcli types --filter User
 gqlcli types --kind ENUM                # OBJECT | ENUM | INPUT_OBJECT | SCALAR | INTERFACE | UNION
+gqlcli types --filter Citizen --kind ENUM  # combine name + kind filters
 
 gqlcli describe User                    # SDL definition of a specific type
 gqlcli describe CreateUserInput --args  # include field argument signatures
+gqlcli describe Citizen --depth 1       # include directly referenced non-scalar types
+gqlcli describe Citizen --depth 2       # recurse one level deeper
 ```
+
+Depth behavior for describe:
+- `--depth 0` only prints the requested type (default)
+- `--depth 1` includes directly referenced non-scalar types
+- `--depth N` recursively expands non-scalar references up to N levels (including `UNION`/`INTERFACE` `possibleTypes`) (including `UNION`/`INTERFACE` `possibleTypes`)
+
+## List operations (queries and mutations)
+
+Use these to discover top-level operations before writing a query or mutation body.
+
+```bash
+gqlcli queries                                  # list all Query fields
+gqlcli queries --args --desc                    # include argument signatures and descriptions
+gqlcli queries --filter citizen                 # filter by operation name substring
+gqlcli queries --filter citizen --args --desc   # practical discovery view
+gqlcli queries --filter citizen -f json         # machine-readable output
+
+gqlcli mutations                                # list all Mutation fields
+gqlcli mutations --args --desc                  # include argument signatures and descriptions
+gqlcli mutations --filter create                # filter by operation name substring
+gqlcli mutations --filter citizen --args --desc # practical discovery view
+gqlcli mutations --filter citizen -f json       # machine-readable output
+```
+
+Suggested flow:
+- Run `queries` or `mutations` to discover operation names and arguments
+- Run `describe` on related input/output types
+- Execute with `query` or `mutation`
 
 ## Execute queries
 
@@ -110,6 +141,8 @@ gqlcli mutation --op create-user --env prod --input '{"name":"Alice"}'
 
 `--op` is available on `query`, `mutation`, and `subscribe` commands. Using the wrong operation type returns an error. Subscription operations can also be stored manually in `.gqlcli.json` with `"type": "subscription"`.
 
+`op save` currently supports `--query` and `--mutation` flags only. To use `--op` with `subscribe`, add the subscription operation manually under `.gqlcli.json -> operations` with `"type": "subscription"` and the GraphQL text in `"query"`.
+
 ## Batch operations
 
 Send multiple operations in one request. Each line is a JSON object with `"query"` (required),
@@ -168,7 +201,9 @@ gqlcli query '{ viewer { id } }' --dump-headers headers.txt -f json
 gqlcli query '{ viewer { id } }' --metadata status-code --metadata header:X-Request-Id
 ```
 
-`--header/-H`, `--timeout`, `--retry`, `--retry-delay`, `--fail-on-graphql-errors`, and `--insecure` apply to HTTP-backed commands (`query`, `mutation`, `subscribe`, `batch`, `queries`, `mutations`, `types`, `describe`). Metadata flags apply to single response operations.
+`--header/-H`, `--timeout`, `--retry`, `--retry-delay`, `--fail-on-graphql-errors`, and `--insecure` apply to HTTP-backed commands (`query`, `mutation`, `subscribe`, `batch`, `queries`, `mutations`, `types`, `describe`).
+
+Metadata flags (`--include-headers`, `--dump-headers`, `--metadata`) apply to operation commands that return a single response envelope (`query`, `mutation`, `subscribe`), not schema listing commands (`queries`, `mutations`, `types`, `describe`).
 
 ## Output formats
 
@@ -244,3 +279,11 @@ Custom header name or prefix: `--header X-Auth-Token --prefix ""`.
 --fail-on-graphql-errors     # exit non-zero when response.errors is present
 --insecure                   # skip TLS certificate verification
 ```
+
+## Skill install/update
+
+```bash
+gqlcli install-skill
+```
+
+Installs or updates the embedded skill at `~/.claude/skills/gqlcli/SKILL.md`.

@@ -334,6 +334,11 @@ func (b *CLIBuilder) GetDescribeCommand() *cli.Command {
 				Name:  "descriptions",
 				Usage: "Include field/type descriptions",
 			},
+			&cli.IntFlag{
+				Name:  "depth",
+				Usage: "Recursively include referenced non-scalar types up to this depth (0 = only requested type)",
+				Value: 0,
+			},
 			&cli.StringFlag{
 				Name:  "env",
 				Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
@@ -349,9 +354,12 @@ func (b *CLIBuilder) GetDescribeCommand() *cli.Command {
 			if c.NArg() == 0 {
 				return fmt.Errorf("TYPE_NAME argument is required")
 			}
+			if c.Int("depth") < 0 {
+				return fmt.Errorf("--depth must be >= 0")
+			}
 			typeName := c.Args().First()
 			d := NewDescriberFromHTTPClient(httpClient)
-			hint, err := d.DescribeWith(context.Background(), typeName, c.Bool("args"), c.Bool("descriptions"))
+			hint, err := d.DescribeWithDepth(context.Background(), typeName, c.Bool("args"), c.Bool("descriptions"), c.Int("depth"))
 			if err != nil {
 				return err
 			}

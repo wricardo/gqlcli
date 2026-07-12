@@ -98,6 +98,185 @@ func (d *Describer) DescribeWith(ctx context.Context, typeName string, showArgs,
 	return FormatTypeSDL(typeInfo, showArgs, !showDescriptions), nil
 }
 
+// DescribeWithDepth returns SDL for typeName and, when depth > 0, recursively includes
+// referenced non-scalar types up to the requested depth.
+//
+// depth behavior:
+//   - 0: only the requested type
+//   - 1: requested type + directly referenced non-scalar types
+//   - N: recurse through non-scalar references N levels deep
+func (d *Describer) DescribeWithDepth(ctx context.Context, typeName string, showArgs, showDescriptions bool, depth int) (string, error) {
+	if depth < 0 {
+		depth = 0
+	}
+
+	root, err := d.fetch(ctx, typeName)
+	if err != nil {
+		return "", err
+	}
+
+	var out strings.Builder
+	seen := map[string]bool{}
+	if err := d.appendTypeSDLRecursive(ctx, &out, root, showArgs, showDescriptions, depth, seen); err != nil {
+		return "", err
+	}
+	return out.String(), nil
+}
+
+// DescribeWithFieldFilter returns SDL for typeName with only fields whose names
+// contain fieldFilter (case-insensitive). If no fields match, it returns "".
+//
+// This is used by schema hint enrichment for unknown field errors, so users see
+// the closest matching fields first. Callers should fall back to Describe when
+// the returned hint is empty.
+func (d *Describer) DescribeWithFieldFilter(ctx context.Context, typeName, fieldFilter string) (string, error) {
+	if strings.TrimSpace(fieldFilter) == "" {
+		return "", nil
+	}
+
+	typeInfo, err := d.fetch(ctx, typeName)
+	if err != nil {
+		return "", err
+	}
+
+	fields, ok := typeInfo["fields"].([]interface{})
+	if !ok || len(fields) == 0 {
+		return "", nil
+	}
+
+	filtered := filterOperations(fields, fieldFilter)
+	if len(filtered) == 0 {
+		return "", nil
+	}
+
+	filteredType := map[string]interface{}{
+		"name":   typeInfo["name"],
+		"kind":   typeInfo["kind"],
+		"fields": filtered,
+	}
+
+	return "# Closest matches\n" + FormatTypeSDL(filteredType, false, true), nil
+}
+
+func (d *Describer) appendTypeSDLRecursive(
+	ctx context.Context,
+	out *strings.Builder,
+	typeInfo map[string]interface{},
+	showArgs bool,
+	showDescriptions bool,
+	depth int,
+	seen map[string]bool,
+) error {
+	name, _ := typeInfo["name"].(string)
+	if name == "" || seen[name] {
+		return nil
+	}
+	if strings.HasPrefix(name, "__") {
+		return nil
+	}
+	seen[name] = true
+
+	out.WriteString(FormatTypeSDL(typeInfo, showArgs, !showDescriptions))
+
+	if depth == 0 {
+		return nil
+	}
+
+	for _, depName := range collectReferencedTypeNames(typeInfo) {
+		if depName == "" || seen[depName] || isBuiltInScalar(depName) || strings.HasPrefix(depName, "__") {
+			continue
+		}
+		depInfo, err := d.fetch(ctx, depName)
+		if err != nil {
+			return err
+		}
+		if err := d.appendTypeSDLRecursive(ctx, out, depInfo, showArgs, showDescriptions, depth-1, seen); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func collectReferencedTypeNames(typeData map[string]interface{}) []string {
+	names := map[string]struct{}{}
+	var out []string
+
+	addTypeRef := func(ref interface{}) {
+		name := baseTypeName(ref)
+		if name == "" {
+			return
+		}
+		if _, exists := names[name]; exists {
+			return
+		}
+		names[name] = struct{}{}
+		out = append(out, name)
+	}
+
+	if fields, ok := typeData["fields"].([]interface{}); ok {
+		for _, f := range fields {
+			fm, ok := f.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			addTypeRef(fm["type"])
+			if args, ok := fm["args"].([]interface{}); ok {
+				for _, a := range args {
+					am, ok := a.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					addTypeRef(am["type"])
+				}
+			}
+		}
+	}
+
+	if inputFields, ok := typeData["inputFields"].([]interface{}); ok {
+		for _, f := range inputFields {
+			fm, ok := f.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			addTypeRef(fm["type"])
+		}
+	}
+
+	if possibleTypes, ok := typeData["possibleTypes"].([]interface{}); ok {
+		for _, p := range possibleTypes {
+			addTypeRef(p)
+		}
+	}
+
+	sort.Strings(out)
+	return out
+}
+
+func baseTypeName(typeData interface{}) string {
+	tm, ok := typeData.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	kind, _ := tm["kind"].(string)
+	name, _ := tm["name"].(string)
+	switch kind {
+	case "NON_NULL", "LIST":
+		return baseTypeName(tm["ofType"])
+	default:
+		return name
+	}
+}
+
+func isBuiltInScalar(name string) bool {
+	switch name {
+	case "String", "Int", "Float", "Boolean", "ID":
+		return true
+	default:
+		return false
+	}
+}
+
 // fetch retrieves and caches the raw introspection data for a type.
 func (d *Describer) fetch(ctx context.Context, typeName string) (map[string]interface{}, error) {
 	if cached, ok := d.cache.Load(typeName); ok {
@@ -139,6 +318,7 @@ func buildDescribeQuery(typeName string) string {
     fields { name type { ...TypeRef } args { name type { ...TypeRef } } }
     inputFields { name type { ...TypeRef } }
     enumValues { name }
+    possibleTypes { ...TypeRef }
   }
 }
 %s`, typeName, frag)

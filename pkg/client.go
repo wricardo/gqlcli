@@ -14,22 +14,48 @@ import (
 )
 
 var (
+	reErrUnknownOutput = regexp.MustCompile(`Cannot query field "([^"]+)" on type "([^"]+)"`)
 	reErrOutputField   = regexp.MustCompile(`Cannot query field "[^"]+" on type "([^"]+)"`)
 	reErrInputField    = regexp.MustCompile(`Field "[^"]+" is not defined by type "([^"]+)"`)
 	reErrUnknownArg    = regexp.MustCompile(`Unknown argument "[^"]+" on field "([^.]+)\.[^"]+"`)
+	reErrUnknownArgOnField = regexp.MustCompile(`Unknown argument "[^"]+" on field "([^.]+)\.([^"]+)"`)
 	reErrNeedsSubfield = regexp.MustCompile(`Field "[^"]+" of type "([^"]+)" must have a selection of subfields`)
+	reErrNeedsSubfieldField = regexp.MustCompile(`Field "([^"]+)" of type "[^"]+" must have a selection of subfields`)
 )
 
-func extractTypeFromErrorMsg(msg string) string {
-	for _, re := range []*regexp.Regexp{reErrOutputField, reErrInputField, reErrUnknownArg} {
-		if m := re.FindStringSubmatch(msg); len(m) == 2 {
-			return m[1]
-		}
+type schemaHintTarget struct {
+	typeName    string
+	fieldFilter string
+}
+
+func extractHintTargetFromErrorMsg(msg string) schemaHintTarget {
+	if m := reErrUnknownOutput.FindStringSubmatch(msg); len(m) == 3 {
+		return schemaHintTarget{typeName: m[2], fieldFilter: m[1]}
+	}
+	if m := reErrUnknownArgOnField.FindStringSubmatch(msg); len(m) == 3 {
+		return schemaHintTarget{typeName: m[1], fieldFilter: m[2]}
 	}
 	if m := reErrNeedsSubfield.FindStringSubmatch(msg); len(m) == 2 {
-		return strings.Trim(m[1], "[]!")
+		typeName := strings.Trim(m[1], "[]!")
+		if fm := reErrNeedsSubfieldField.FindStringSubmatch(msg); len(fm) == 2 {
+			return schemaHintTarget{typeName: typeName, fieldFilter: fm[1]}
+		}
+		return schemaHintTarget{typeName: typeName}
 	}
-	return ""
+	if m := reErrInputField.FindStringSubmatch(msg); len(m) == 2 {
+		return schemaHintTarget{typeName: m[1]}
+	}
+	if m := reErrUnknownArg.FindStringSubmatch(msg); len(m) == 2 {
+		return schemaHintTarget{typeName: m[1]}
+	}
+	if m := reErrOutputField.FindStringSubmatch(msg); len(m) == 2 {
+		return schemaHintTarget{typeName: m[1]}
+	}
+	return schemaHintTarget{}
+}
+
+func extractTypeFromErrorMsg(msg string) string {
+	return extractHintTargetFromErrorMsg(msg).typeName
 }
 
 // HTTPClient is a GraphQL client that executes operations via HTTP
@@ -285,11 +311,19 @@ func (c *HTTPClient) enrichErrors(ctx context.Context, errors []interface{}) {
 			}
 		}
 
-		typeName := extractTypeFromErrorMsg(msg)
-		if typeName == "" {
+		target := extractHintTargetFromErrorMsg(msg)
+		if target.typeName == "" {
 			continue
 		}
-		hint, err := c.getDescriber().Describe(ctx, typeName)
+
+		var hint string
+		var err error
+		if target.fieldFilter != "" {
+			hint, err = c.getDescriber().DescribeWithFieldFilter(ctx, target.typeName, target.fieldFilter)
+		}
+		if hint == "" {
+			hint, err = c.getDescriber().Describe(ctx, target.typeName)
+		}
 		if err != nil || hint == "" {
 			continue
 		}

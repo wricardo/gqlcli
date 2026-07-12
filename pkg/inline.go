@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"regexp"
-	"strings"
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/handler"
@@ -108,13 +106,6 @@ func truncateHint(hint string) string {
 
 // --- schema hint error presenter ---
 
-var (
-	reOutputField   = regexp.MustCompile(`Cannot query field "[^"]+" on type "([^"]+)"`)
-	reInputField    = regexp.MustCompile(`Field "[^"]+" is not defined by type "([^"]+)"`)
-	reUnknownArg    = regexp.MustCompile(`Unknown argument "[^"]+" on field "([^.]+)\.[^"]+"`)
-	reNeedsSubfield = regexp.MustCompile(`Field "[^"]+" of type "([^"]+)" must have a selection of subfields`)
-)
-
 func makeSchemaHintPresenter(d *Describer) graphql.ErrorPresenterFunc {
 	return func(ctx context.Context, err error) *gqlerror.Error {
 		gqlErr, ok := err.(*gqlerror.Error)
@@ -122,21 +113,21 @@ func makeSchemaHintPresenter(d *Describer) graphql.ErrorPresenterFunc {
 			gqlErr = &gqlerror.Error{Message: err.Error()}
 		}
 
-		var typeName string
-		switch {
-		case len(reOutputField.FindStringSubmatch(gqlErr.Message)) == 2:
-			typeName = reOutputField.FindStringSubmatch(gqlErr.Message)[1]
-		case len(reInputField.FindStringSubmatch(gqlErr.Message)) == 2:
-			typeName = reInputField.FindStringSubmatch(gqlErr.Message)[1]
-		case len(reUnknownArg.FindStringSubmatch(gqlErr.Message)) == 2:
-			typeName = reUnknownArg.FindStringSubmatch(gqlErr.Message)[1]
-		case len(reNeedsSubfield.FindStringSubmatch(gqlErr.Message)) == 2:
-			raw := reNeedsSubfield.FindStringSubmatch(gqlErr.Message)[1]
-			typeName = strings.Trim(raw, "[]!")
-		}
+		target := extractHintTargetFromErrorMsg(gqlErr.Message)
 
-		if typeName != "" {
-			if hint, hintErr := d.Describe(ctx, typeName); hintErr == nil && hint != "" {
+		if target.typeName != "" {
+			var hint string
+			var hintErr error
+
+			if target.fieldFilter != "" {
+				hint, hintErr = d.DescribeWithFieldFilter(ctx, target.typeName, target.fieldFilter)
+			}
+
+			if hint == "" {
+				hint, hintErr = d.Describe(ctx, target.typeName)
+			}
+
+			if hintErr == nil && hint != "" {
 				if gqlErr.Extensions == nil {
 					gqlErr.Extensions = map[string]interface{}{}
 				}

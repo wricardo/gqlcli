@@ -141,14 +141,18 @@ func (cs *InlineCommandSet) describeCommand() *cli.Command {
 		Flags: []cli.Flag{
 			&cli.BoolFlag{Name: "args", Aliases: []string{"a"}, Usage: "Expand field argument signatures"},
 			&cli.BoolFlag{Name: "descriptions", Usage: "Include field/type descriptions"},
+			&cli.IntFlag{Name: "depth", Usage: "Recursively include referenced non-scalar types up to this depth (0 = only requested type)", Value: 0},
 		},
 		Action: func(c *cli.Context) error {
 			if c.NArg() == 0 {
 				return fmt.Errorf("TYPE_NAME argument is required")
 			}
+			if c.Int("depth") < 0 {
+				return fmt.Errorf("--depth must be >= 0")
+			}
 			typeName := c.Args().First()
 			d := NewDescriber(cs.exec)
-			hint, err := d.DescribeWith(context.Background(), typeName, c.Bool("args"), c.Bool("descriptions"))
+			hint, err := d.DescribeWithDepth(context.Background(), typeName, c.Bool("args"), c.Bool("descriptions"), c.Int("depth"))
 			if err != nil {
 				return err
 			}

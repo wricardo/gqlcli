@@ -16,9 +16,9 @@ var skillMD []byte
 func (b *CLIBuilder) GetInstallSkillCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "install-skill",
-		Usage: "Install the gqlcli Claude Code skill to ~/.claude/skills/gqlcli/",
+		Usage: "Install or update the gqlcli Claude Code skill at ~/.claude/skills/gqlcli/",
 		Description: "Installs the gqlcli skill for Claude Code so that Claude knows how to use " +
-			"gqlcli. Skips installation if the skill is already present.",
+			"gqlcli. If the skill is already present, it is updated.",
 		Action: func(c *cli.Context) error {
 			home, err := os.UserHomeDir()
 			if err != nil {
@@ -28,9 +28,10 @@ func (b *CLIBuilder) GetInstallSkillCommand() *cli.Command {
 			skillDir := filepath.Join(home, ".claude", "skills", "gqlcli")
 			skillFile := filepath.Join(skillDir, "SKILL.md")
 
-			if _, err := os.Stat(skillFile); err == nil {
-				fmt.Println("skill already installed at", skillFile)
-				return nil
+			_, statErr := os.Stat(skillFile)
+			existed := statErr == nil
+			if statErr != nil && !os.IsNotExist(statErr) {
+				return fmt.Errorf("could not check existing skill file: %w", statErr)
 			}
 
 			if err := os.MkdirAll(skillDir, 0755); err != nil {
@@ -41,7 +42,11 @@ func (b *CLIBuilder) GetInstallSkillCommand() *cli.Command {
 				return fmt.Errorf("could not write skill file: %w", err)
 			}
 
-			fmt.Println("skill installed at", skillFile)
+			if existed {
+				fmt.Println("skill updated at", skillFile)
+			} else {
+				fmt.Println("skill installed at", skillFile)
+			}
 			return nil
 		},
 	}

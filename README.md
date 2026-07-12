@@ -561,6 +561,7 @@ Saved operations live in `.gqlcli.json` and run with `gqlcli query --op NAME` or
 TYPE_NAME                    Name of the type to describe (required)
 --args, -a                   Expand field argument signatures
 --descriptions               Include field/type descriptions
+--depth N                    Recursively include referenced non-scalar types (including UNION/INTERFACE possibleTypes)
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
 --env VALUE                  Environment from .gqlcli.json
 -d, --debug                  Enable debug logging

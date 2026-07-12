@@ -5,7 +5,8 @@ APP_NAME := gqlcli
 BINARY_NAME := gqlcli
 BINARY_PATH := ./bin/$(BINARY_NAME)
 CMD_PATH := ./cmd/gqlcli/main.go
-INSTALL_PATH := /usr/local/bin/$(BINARY_NAME)
+INSTALL_DIR := /usr/local/bin
+INSTALL_PATH := $(INSTALL_DIR)/$(BINARY_NAME)
 
 # Go settings
 GO := go
@@ -25,7 +26,7 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-15s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(GREEN)Examples:$(NC)"
-	@echo "  make install          # Install gqlcli using go (to \$$GOPATH/bin or /usr/local/bin)"
+	@echo "  make install          # Install gqlcli to /usr/local/bin"
 	@echo "  make build            # Build the CLI binary to ./bin/gqlcli"
 	@echo "  make dev              # Build and run locally for testing"
 	@echo "  make test             # Run tests"
@@ -39,25 +40,20 @@ build: ## Build the CLI binary
 	@$(GO) build $(GOFLAGS) -o $(BINARY_PATH) $(CMD_PATH)
 	@echo "$(GREEN)✓ Built successfully: $(BINARY_PATH)$(NC)"
 
-install: ## Install the CLI using go install (if available) or to /usr/local/bin
+install: ## Install the CLI to /usr/local/bin
 	@echo "$(BLUE)Installing $(BINARY_NAME)...$(NC)"
 	@if command -v go >/dev/null 2>&1; then \
-		GOBIN=$$($(GO) env GOPATH)/bin; \
-		echo "Using 'go build' and installing to $$GOBIN/$(BINARY_NAME)"; \
+		echo "Using 'go build' and installing to $(INSTALL_PATH)"; \
 		mkdir -p bin; \
-		$(GO) build $(GOFLAGS) -o bin/$(BINARY_NAME) $(CMD_PATH); \
-		mkdir -p $$GOBIN; \
-		cp bin/$(BINARY_NAME) $$GOBIN/$(BINARY_NAME); \
-		chmod +x $$GOBIN/$(BINARY_NAME); \
-		echo "$(GREEN)✓ Installed to $$GOBIN/$(BINARY_NAME)$(NC)"; \
-		echo "  Make sure $$GOBIN is in your PATH"; \
+		$(GO) build $(GOFLAGS) -o $(BINARY_PATH) $(CMD_PATH); \
 	else \
-		echo "$(YELLOW)Go not found in PATH, using fallback to /usr/local/bin...$(NC)"; \
-		$(MAKE) build; \
-		sudo cp $(BINARY_PATH) $(INSTALL_PATH); \
-		sudo chmod +x $(INSTALL_PATH); \
-		echo "$(GREEN)✓ Installed successfully to $(INSTALL_PATH)$(NC)"; \
-	fi
+		echo "$(YELLOW)Go not found in PATH; installing existing $(BINARY_PATH)...$(NC)"; \
+		test -f $(BINARY_PATH) || { echo "$(YELLOW)$(BINARY_PATH) not found; install Go or run 'make build' first.$(NC)"; exit 1; }; \
+	fi; \
+	sudo mkdir -p $(INSTALL_DIR); \
+	sudo cp -f $(BINARY_PATH) $(INSTALL_PATH); \
+	sudo chmod +x $(INSTALL_PATH); \
+	echo "$(GREEN)✓ Installed successfully to $(INSTALL_PATH)$(NC)"
 	@echo "  Run '$(BINARY_NAME) --help' to get started"
 
 install-local: build ## Install the CLI to ./bin (no sudo required)
