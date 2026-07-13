@@ -75,7 +75,10 @@ func ReorderArgsForCommand(args []string, flags []cli.Flag) []string {
 // ReorderOSArgs reorders a full os.Args-style slice (args[0] is the program
 // name) so that, for whichever top-level command is invoked, that command's
 // own flags precede its positional arguments. Non-command tokens (e.g. no
-// args, or top-level --help/--version) are returned unchanged.
+// args, or top-level --help/--version) are returned unchanged. Commands that
+// have their own Subcommands (e.g. "config", "op") are left untouched — their
+// first positional token is a subcommand name that must stay in place, and
+// reordering would misroute it behind hoisted flags.
 func ReorderOSArgs(args []string, commands []*cli.Command) []string {
 	if len(args) < 2 {
 		return args
@@ -83,6 +86,9 @@ func ReorderOSArgs(args []string, commands []*cli.Command) []string {
 	for _, cmd := range commands {
 		if cmd.Name != args[1] && !containsString(cmd.Aliases, args[1]) {
 			continue
+		}
+		if len(cmd.Subcommands) > 0 {
+			return args
 		}
 		reordered := ReorderArgsForCommand(args[2:], cmd.Flags)
 		out := make([]string, 0, len(args))

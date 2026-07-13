@@ -132,3 +132,20 @@ func TestQueryCommand_VariablesFlagAfterPositional_EndToEnd(t *testing.T) {
 		t.Fatalf("variables.id = %v, want 42", vars["id"])
 	}
 }
+
+// TestReorderOSArgs_CommandWithSubcommandsIsUntouched guards against a real
+// regression: "config" (and "op") dispatch to a nested subcommand via their
+// first positional token (e.g. `config set-default --name X`). Reordering
+// using the parent command's own (near-empty) Flags would hoist --name
+// ahead of "set-default", breaking the nested dispatch entirely.
+func TestReorderOSArgs_CommandWithSubcommandsIsUntouched(t *testing.T) {
+	cmds := []*cli.Command{{
+		Name:        "config",
+		Subcommands: []*cli.Command{{Name: "set-default"}},
+	}}
+	args := []string{"gqlcli", "config", "set-default", "--name", "smoke-citizen"}
+	got := ReorderOSArgs(args, cmds)
+	if !reflect.DeepEqual(got, args) {
+		t.Fatalf("got %v, want unchanged %v", got, args)
+	}
+}
