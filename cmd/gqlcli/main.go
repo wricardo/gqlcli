@@ -108,7 +108,8 @@ PRECEDENCE (highest to lowest)
 
 	builder.RegisterCommands(app)
 
-	if err := app.Run(os.Args); err != nil {
+	args := gqlcli.ReorderOSArgs(os.Args, app.Commands)
+	if err := app.Run(args); err != nil {
 		log.Fatal(err)
 	}
 }
