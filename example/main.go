@@ -29,7 +29,11 @@ func main() {
 	}
 	commands.Mount(app)
 
-	if err := app.Run(os.Args); err != nil {
+	// Use gqlcli.RunApp (not app.Run directly) so flags placed after a
+	// command's positional argument — e.g. `myapp query '{ books { id } }'
+	// --variables '{...}'` — are parsed correctly instead of silently
+	// dropped.
+	if err := gqlcli.RunApp(app, os.Args); err != nil {
 		log.Fatal(err)
 	}
 }

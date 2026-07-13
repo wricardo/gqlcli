@@ -99,6 +99,18 @@ func ReorderOSArgs(args []string, commands []*cli.Command) []string {
 	return args
 }
 
+// RunApp is a drop-in replacement for app.Run(args) that applies
+// ReorderOSArgs first. Every entrypoint that builds a *cli.App from this
+// package's commands — the gqlcli binary itself (cmd/gqlcli) and any
+// embedder using InlineCommandSet.Mount (see example/main.go) — should call
+// gqlcli.RunApp(app, os.Args) instead of app.Run(os.Args) directly;
+// otherwise flags placed after a command's positional argument (the
+// documented usage shown by --help) are silently dropped, since Mount only
+// appends commands and has no way to intercept args itself.
+func RunApp(app *cli.App, args []string) error {
+	return app.Run(ReorderOSArgs(args, app.Commands))
+}
+
 func containsString(ss []string, s string) bool {
 	for _, v := range ss {
 		if v == s {

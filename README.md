@@ -659,7 +659,9 @@ func main() {
 	}
 
 	builder.RegisterCommands(app)
-	if err := app.Run(os.Args); err != nil {
+	// Use gqlcli.RunApp, not app.Run directly — it reorders flags placed
+	// after a command's positional argument so they aren't dropped.
+	if err := gqlcli.RunApp(app, os.Args); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -712,7 +714,9 @@ func main() {
 	app := &cli.App{Name: "myapp", Usage: "CLI for my GraphQL API"}
 	commands.Mount(app)
 
-	if err := app.Run(os.Args); err != nil {
+	// Use gqlcli.RunApp, not app.Run directly — it reorders flags placed
+	// after a command's positional argument so they aren't dropped.
+	if err := gqlcli.RunApp(app, os.Args); err != nil {
 		log.Fatal(err)
 	}
 }
