@@ -181,7 +181,7 @@ func (f *LLMFormatter) Format(data map[string]interface{}) (string, error) {
 	// Handle types list: render each type as SDL
 	if typesList, ok := data["types"].([]interface{}); ok {
 		fmt.Fprintf(&buf, "```graphql\n")
-		fmt.Fprint(&buf, formatTypesAsSDL(typesList))
+		fmt.Fprint(&buf, formatTypesAsSDL(typesList, true, true))
 		fmt.Fprintf(&buf, "```\n")
 		return buf.String(), nil
 	}

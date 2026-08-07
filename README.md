@@ -316,6 +316,9 @@ gqlcli types --kind OBJECT
 gqlcli types --kind ENUM
 gqlcli types --kind INPUT_OBJECT
 
+# Include field argument signatures and doc strings
+gqlcli types --filter User --args --desc
+
 # Compact output (good for piping)
 gqlcli types -f compact
 ```
@@ -395,6 +398,13 @@ gqlcli op save \
 
 gqlcli mutation --op create-user --input '{"name":"Alice","email":"alice@example.com"}'
 
+# Save and run a subscription
+gqlcli op save \
+  --name watch-messages \
+  --subscription 'subscription { messageAdded { id text } }'
+
+gqlcli subscribe --op watch-messages
+
 # Manage saved operations
 gqlcli op list
 gqlcli op show --name get-user
@@ -414,6 +424,8 @@ Saved operations are stored under the `operations` key:
   }
 }
 ```
+
+Subscriptions are stored with `"type": "subscription"`, reusing the `query` field for the operation text (there is no separate `subscription` field).
 
 Use `--operation` when selecting a GraphQL operation from a multi-operation document. Use `--op` when running a saved operation from `.gqlcli.json`.
 
@@ -509,13 +521,13 @@ Output is NDJSON subscription envelopes: `next`, `error`, and `complete`.
 
 ### `op` Command
 ```
-gqlcli op save --name NAME (--query QUERY | --mutation MUTATION) [--defaults JSON]
+gqlcli op save --name NAME (--query QUERY | --mutation MUTATION | --subscription SUBSCRIPTION) [--defaults JSON]
 gqlcli op list
 gqlcli op show --name NAME
 gqlcli op delete --name NAME
 ```
 
-Saved operations live in `.gqlcli.json` and run with `gqlcli query --op NAME` or `gqlcli mutation --op NAME`.
+Saved operations live in `.gqlcli.json` and run with `gqlcli query --op NAME`, `gqlcli mutation --op NAME`, or `gqlcli subscribe --op NAME`.
 
 ### `batch` Command
 ```
@@ -560,7 +572,7 @@ Saved operations live in `.gqlcli.json` and run with `gqlcli query --op NAME` or
 ```
 TYPE_NAME                    Name of the type to describe (required)
 --args, -a                   Expand field argument signatures
---descriptions               Include field/type descriptions
+--desc                        Include field/type descriptions
 --depth N                    Recursively include referenced non-scalar types (including UNION/INTERFACE possibleTypes)
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
 --env VALUE                  Environment from .gqlcli.json
@@ -882,7 +894,7 @@ gqlcli mutation \
 gqlcli types --format json-pretty > types.json
 
 # Describe specific types
-gqlcli describe User --args --descriptions
+gqlcli describe User --args --desc
 gqlcli describe CreateUserInput --args
 ```
 

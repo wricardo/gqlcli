@@ -315,8 +315,8 @@ func buildDescribeQuery(typeName string) string {
 	return fmt.Sprintf(`query {
   __type(name: %q) {
     name kind description
-    fields { name type { ...TypeRef } args { name type { ...TypeRef } } }
-    inputFields { name type { ...TypeRef } }
+    fields { name description type { ...TypeRef } args { name type { ...TypeRef } } }
+    inputFields { name description type { ...TypeRef } }
     enumValues { name }
     possibleTypes { ...TypeRef }
   }
@@ -364,10 +364,12 @@ func FormatTypeSDL(typeData map[string]interface{}, showArgs, noDescriptions boo
 			fm := sorted[i]
 			ftype := formatTypeRef(fm["type"])
 			fmArgs, _ := fm["args"].([]interface{})
+			fmDesc, _ := fm["description"].(string)
+			hasDesc := !noDescriptions && fmDesc != ""
 
-			// Fields with args always get their own line
-			if showArgs && len(fmArgs) > 0 {
-				b.WriteString(formatSDLField(fm, showArgs))
+			// Fields with args, or with a description to show, always get their own line
+			if hasDesc || (showArgs && len(fmArgs) > 0) {
+				b.WriteString(formatSDLField(fm, showArgs, !noDescriptions))
 				i++
 				continue
 			}
@@ -378,7 +380,8 @@ func FormatTypeSDL(typeData map[string]interface{}, showArgs, noDescriptions boo
 			for j < len(sorted) {
 				next := sorted[j]
 				nextArgs, _ := next["args"].([]interface{})
-				if formatTypeRef(next["type"]) != ftype || (showArgs && len(nextArgs) > 0) {
+				nextDesc, _ := next["description"].(string)
+				if formatTypeRef(next["type"]) != ftype || (showArgs && len(nextArgs) > 0) || (!noDescriptions && nextDesc != "") {
 					break
 				}
 				group = append(group, next)
@@ -386,7 +389,7 @@ func FormatTypeSDL(typeData map[string]interface{}, showArgs, noDescriptions boo
 			}
 
 			if len(group) == 1 {
-				b.WriteString(formatSDLField(fm, showArgs))
+				b.WriteString(formatSDLField(fm, showArgs, !noDescriptions))
 			} else {
 				names := make([]string, len(group))
 				for k, g := range group {
@@ -466,7 +469,8 @@ func sortFieldsByType(fields []interface{}) []map[string]interface{} {
 
 // formatTypesAsSDL renders a list of type introspection objects as SDL definitions,
 // skipping built-in introspection types (names starting with "__").
-func formatTypesAsSDL(typesList []interface{}) string {
+// showArgs expands field argument signatures; showDescriptions includes doc comments.
+func formatTypesAsSDL(typesList []interface{}, showArgs, showDescriptions bool) string {
 	var b strings.Builder
 	for _, t := range typesList {
 		tm, ok := t.(map[string]interface{})
@@ -477,15 +481,29 @@ func formatTypesAsSDL(typesList []interface{}) string {
 		if strings.HasPrefix(name, "__") {
 			continue
 		}
-		b.WriteString(FormatTypeSDL(tm, false, true))
+		b.WriteString(FormatTypeSDL(tm, showArgs, !showDescriptions))
 	}
 	return b.String()
 }
 
-func formatSDLField(field map[string]interface{}, showArgs bool) string {
+func formatSDLField(field map[string]interface{}, showArgs, showDescriptions bool) string {
 	var b strings.Builder
 	fname, _ := field["name"].(string)
 	ftype := formatTypeRef(field["type"])
+
+	if showDescriptions {
+		if desc, _ := field["description"].(string); desc != "" {
+			if strings.Contains(desc, "\n") {
+				fmt.Fprintf(&b, "  \"\"\"\n")
+				for _, line := range strings.Split(desc, "\n") {
+					fmt.Fprintf(&b, "  %s\n", line)
+				}
+				fmt.Fprintf(&b, "  \"\"\"\n")
+			} else {
+				fmt.Fprintf(&b, "  # %s\n", desc)
+			}
+		}
+	}
 
 	if showArgs {
 		if args, ok := field["args"].([]interface{}); ok && len(args) > 0 {

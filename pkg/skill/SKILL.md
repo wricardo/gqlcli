@@ -33,6 +33,7 @@ gqlcli types                            # all types
 gqlcli types --filter User
 gqlcli types --kind ENUM                # OBJECT | ENUM | INPUT_OBJECT | SCALAR | INTERFACE | UNION
 gqlcli types --filter Citizen --kind ENUM  # combine name + kind filters
+gqlcli types --filter User --args --desc   # with field argument types and doc strings
 
 gqlcli describe User                    # SDL definition of a specific type
 gqlcli describe CreateUserInput --args  # include field argument signatures
@@ -116,7 +117,7 @@ Output is one JSON object per line: `next`, `error`, and `complete`. Press Ctrl-
 
 ## Named operations (save and reuse)
 
-Save a query or mutation by name to avoid repeating it. Stored in `.gqlcli.json` under `"operations"`.
+Save a query, mutation, or subscription by name to avoid repeating it. Stored in `.gqlcli.json` under `"operations"`.
 
 ```bash
 # Save
@@ -126,6 +127,9 @@ gqlcli op save --name get-user \
 
 gqlcli op save --name create-user \
   --mutation 'mutation CreateUser($input: CreateUserInput!) { createUser(input: $input) { id } }'
+
+gqlcli op save --name watch-messages \
+  --subscription 'subscription { messageAdded { id text } }'
 
 # CRUD
 gqlcli op list
@@ -137,11 +141,10 @@ gqlcli query --op get-user
 gqlcli query --op get-user --variables '{"id":"456"}'
 gqlcli mutation --op create-user --input '{"name":"Alice"}'
 gqlcli mutation --op create-user --env prod --input '{"name":"Alice"}'
+gqlcli subscribe --op watch-messages
 ```
 
-`--op` is available on `query`, `mutation`, and `subscribe` commands. Using the wrong operation type returns an error. Subscription operations can also be stored manually in `.gqlcli.json` with `"type": "subscription"`.
-
-`op save` currently supports `--query` and `--mutation` flags only. To use `--op` with `subscribe`, add the subscription operation manually under `.gqlcli.json -> operations` with `"type": "subscription"` and the GraphQL text in `"query"`.
+`--op` is available on `query`, `mutation`, and `subscribe` commands. Using the wrong operation type returns an error. `op save --subscription` stores it with `"type": "subscription"`, reusing the `"query"` field for the GraphQL text (no separate `"subscription"` field).
 
 ## Batch operations
 

@@ -305,7 +305,7 @@ func (b *CLIBuilder) GetDescribeCommand() *cli.Command {
 		Aliases:     []string{"d"},
 		Usage:       "Show the SDL definition of a GraphQL type",
 		ArgsUsage:   "TYPE_NAME",
-		Description: "Print the SDL definition of a single named GraphQL type.\n\nUse this to understand the shape of any type before writing a query or mutation.\nAdd --args to see what arguments each field accepts, --descriptions for doc strings.\n\nExamples:\n  gqlcli describe User\n  gqlcli describe CreateUserInput --args\n  gqlcli describe Order --args --descriptions",
+		Description: "Print the SDL definition of a single named GraphQL type.\n\nUse this to understand the shape of any type before writing a query or mutation.\nAdd --args to see what arguments each field accepts, --desc for doc strings.\n\nExamples:\n  gqlcli describe User\n  gqlcli describe CreateUserInput --args\n  gqlcli describe Order --args --desc",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "url",
@@ -331,8 +331,9 @@ func (b *CLIBuilder) GetDescribeCommand() *cli.Command {
 				Usage:   "Expand field argument signatures",
 			},
 			&cli.BoolFlag{
-				Name:  "descriptions",
-				Usage: "Include field/type descriptions",
+				Name:    "desc",
+				Aliases: []string{"descriptions"},
+				Usage:   "Include field/type descriptions",
 			},
 			&cli.IntFlag{
 				Name:  "depth",
@@ -359,7 +360,7 @@ func (b *CLIBuilder) GetDescribeCommand() *cli.Command {
 			}
 			typeName := c.Args().First()
 			d := NewDescriberFromHTTPClient(httpClient)
-			hint, err := d.DescribeWithDepth(context.Background(), typeName, c.Bool("args"), c.Bool("descriptions"), c.Int("depth"))
+			hint, err := d.DescribeWithDepth(context.Background(), typeName, c.Bool("args"), c.Bool("desc"), c.Int("depth"))
 			if err != nil {
 				return err
 			}
@@ -383,10 +384,12 @@ func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 			"  INTERFACE     Interface definitions\n" +
 			"  UNION         Union types\n\n" +
 			"After finding a type name, use 'describe <TYPE>' to see its field definitions.\n\n" +
+			"Add --args to see field argument signatures, --desc for doc strings.\n\n" +
 			"Examples:\n" +
 			"  gqlcli types\n" +
 			"  gqlcli types --kind INPUT_OBJECT\n" +
-			"  gqlcli types --filter user",
+			"  gqlcli types --filter user\n" +
+			"  gqlcli types --filter user --args --desc",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "url",
@@ -414,6 +417,16 @@ func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 				Name:    "kind",
 				Aliases: []string{"k"},
 				Usage:   "Filter by type kind: OBJECT, ENUM, INPUT_OBJECT, SCALAR, INTERFACE, UNION",
+			},
+			&cli.BoolFlag{
+				Name:    "args",
+				Aliases: []string{"a"},
+				Usage:   "Expand field argument signatures",
+			},
+			&cli.BoolFlag{
+				Name:    "desc",
+				Aliases: []string{"descriptions"},
+				Usage:   "Include field/type descriptions",
 			},
 			&cli.StringFlag{
 				Name:    "format",
@@ -474,7 +487,7 @@ func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 
 			// Default (toon) format: SDL-like output per type
 			if c.String("format") == "toon" {
-				fmt.Print(formatTypesAsSDL(typesList))
+				fmt.Print(formatTypesAsSDL(typesList, c.Bool("args"), c.Bool("desc")))
 				return nil
 			}
 

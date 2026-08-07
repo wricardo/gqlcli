@@ -41,6 +41,10 @@ func (b *CLIBuilder) GetOpCommand() *cli.Command {
 						Usage: "GraphQL mutation string (sets type=mutation)",
 					},
 					&cli.StringFlag{
+						Name:  "subscription",
+						Usage: "GraphQL subscription string (sets type=subscription)",
+					},
+					&cli.StringFlag{
 						Name:  "defaults",
 						Usage: "Default variables as JSON, e.g. '{\"id\":\"123\"}'",
 					},
@@ -53,20 +57,31 @@ func (b *CLIBuilder) GetOpCommand() *cli.Command {
 
 					queryStr := c.String("query")
 					mutationStr := c.String("mutation")
-					if queryStr == "" && mutationStr == "" {
-						return fmt.Errorf("one of --query or --mutation is required")
+					subscriptionStr := c.String("subscription")
+					set := 0
+					for _, s := range []string{queryStr, mutationStr, subscriptionStr} {
+						if s != "" {
+							set++
+						}
 					}
-					if queryStr != "" && mutationStr != "" {
-						return fmt.Errorf("only one of --query or --mutation may be set")
+					if set == 0 {
+						return fmt.Errorf("one of --query, --mutation, or --subscription is required")
+					}
+					if set > 1 {
+						return fmt.Errorf("only one of --query, --mutation, or --subscription may be set")
 					}
 
 					op := NamedOperation{}
-					if queryStr != "" {
+					switch {
+					case queryStr != "":
 						op.Type = "query"
 						op.Query = queryStr
-					} else {
+					case mutationStr != "":
 						op.Type = "mutation"
 						op.Mutation = mutationStr
+					default:
+						op.Type = "subscription"
+						op.Query = subscriptionStr
 					}
 
 					if defaultsStr := c.String("defaults"); defaultsStr != "" {
@@ -111,10 +126,13 @@ func (b *CLIBuilder) GetOpCommand() *cli.Command {
 					}
 					sort.Strings(names)
 
-					maxName := 0
+					maxName, maxType := 0, 0
 					for _, n := range names {
 						if len(n) > maxName {
 							maxName = len(n)
+						}
+						if t := len(cfg.Operations[n].Type); t > maxType {
+							maxType = t
 						}
 					}
 
@@ -129,7 +147,7 @@ func (b *CLIBuilder) GetOpCommand() *cli.Command {
 							body = body[:57] + "..."
 						}
 						body = strings.ReplaceAll(body, "\n", " ")
-						fmt.Printf("%-*s  %-8s  %s\n", maxName, n, op.Type, body)
+						fmt.Printf("%-*s  %-*s  %s\n", maxName, n, maxType, op.Type, body)
 					}
 					return nil
 				},
@@ -163,9 +181,10 @@ func (b *CLIBuilder) GetOpCommand() *cli.Command {
 
 					fmt.Printf("name:  %s\n", name)
 					fmt.Printf("type:  %s\n", op.Type)
-					if op.Type == "query" {
-						fmt.Printf("query: %s\n", op.Query)
-					} else {
+					switch op.Type {
+					case "query", "subscription":
+						fmt.Printf("%s: %s\n", op.Type, op.Query)
+					default:
 						fmt.Printf("mutation: %s\n", op.Mutation)
 					}
 					if len(op.Defaults) > 0 {
