@@ -189,7 +189,7 @@ func (b *CLIBuilder) GetBatchCommand() *cli.Command {
 			&cli.IntFlag{Name: "timeout", Usage: "Request timeout in seconds (default: 30)", Value: b.config.Timeout},
 			&cli.IntFlag{Name: "retry", Usage: "Retry count for transient failures (connection errors, 408, 429, 5xx; default: 0)", Value: b.config.RetryCount},
 			&cli.DurationFlag{Name: "retry-delay", Usage: "Delay between retries (e.g. 500ms, 2s; default: 1s when --retry > 0)", Value: b.config.RetryDelay},
-			&cli.BoolFlag{Name: "fail-on-graphql-errors", Usage: "Exit non-zero when any response.errors is present", Value: b.config.FailOnGraphQLErrors},
+			&cli.BoolFlag{Name: "strict", Usage: "Exit non-zero when any response.errors is present (default true; use --strict=false to disable)", Value: b.config.Strict},
 			&cli.BoolFlag{
 				Name:  "ndjson",
 				Usage: "Use NDJSON transport (default)",
@@ -277,7 +277,7 @@ func executeBatchNDJSON(c *cli.Context, client *HTTPClient, input io.Reader, cli
 		return err
 	}
 
-	return outputBatchResults(results, requests, clientJQ, c.Bool("fail-on-graphql-errors"))
+	return outputBatchResults(results, requests, clientJQ, c.Bool("strict"))
 }
 
 func executeBatchArray(c *cli.Context, client *HTTPClient, input io.Reader, clientJQ string) error {
@@ -321,7 +321,7 @@ func executeBatchArray(c *cli.Context, client *HTTPClient, input io.Reader, clie
 		return err
 	}
 
-	return outputBatchResults(results, requests, clientJQ, c.Bool("fail-on-graphql-errors"))
+	return outputBatchResults(results, requests, clientJQ, c.Bool("strict"))
 }
 
 // outputBatchResults applies client-side jq (if any) and prints results

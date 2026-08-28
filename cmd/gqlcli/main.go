@@ -24,6 +24,7 @@ func main() {
 		URL:     "http://localhost:8080/graphql",
 		Format:  "toon",
 		Timeout: 30,
+		Strict:  true,
 	}
 
 	builder := gqlcli.NewCLIBuilder(cfg)

@@ -66,7 +66,7 @@ func TestHTTPClientRetriesTransientFailures(t *testing.T) {
 	}
 }
 
-func TestFailOnGraphQLErrorsControlsErrorBehavior(t *testing.T) {
+func TestStrictControlsErrorBehavior(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":null,"errors":[{"message":"boom"}]}`))
@@ -75,14 +75,14 @@ func TestFailOnGraphQLErrorsControlsErrorBehavior(t *testing.T) {
 
 	client := NewHTTPClient(&Config{URL: server.URL, Timeout: 5})
 	if _, err := client.Execute(context.Background(), ExecutionModeHTTP, QueryOptions{Query: "{ boom }"}); err != nil {
-		t.Fatalf("Execute without FailOnGraphQLErrors returned error: %v", err)
+		t.Fatalf("Execute without Strict returned error: %v", err)
 	}
 
-	client = NewHTTPClient(&Config{URL: server.URL, Timeout: 5, FailOnGraphQLErrors: true})
+	client = NewHTTPClient(&Config{URL: server.URL, Timeout: 5, Strict: true})
 	_, err := client.Execute(context.Background(), ExecutionModeHTTP, QueryOptions{Query: "{ boom }"})
 	var gqlErr *GraphQLResponseError
 	if !errors.As(err, &gqlErr) {
-		t.Fatalf("Execute with FailOnGraphQLErrors error = %T %v, want *GraphQLResponseError", err, err)
+		t.Fatalf("Execute with Strict error = %T %v, want *GraphQLResponseError", err, err)
 	}
 }
 

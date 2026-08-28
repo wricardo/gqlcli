@@ -92,7 +92,7 @@ func (b *CLIBuilder) applyEnvConfig(c *cli.Context) error {
 	if c.IsSet("retry-delay") {
 		b.config.RetryDelay = c.Duration("retry-delay")
 	}
-	b.config.FailOnGraphQLErrors = c.Bool("fail-on-graphql-errors")
+	b.config.Strict = c.Bool("strict")
 	return nil
 }
 
@@ -324,7 +324,7 @@ func (b *CLIBuilder) GetDescribeCommand() *cli.Command {
 			&cli.IntFlag{Name: "timeout", Usage: "Request timeout in seconds (default: 30)", Value: b.config.Timeout},
 			&cli.IntFlag{Name: "retry", Usage: "Retry count for transient failures (connection errors, 408, 429, 5xx; default: 0)", Value: b.config.RetryCount},
 			&cli.DurationFlag{Name: "retry-delay", Usage: "Delay between retries (e.g. 500ms, 2s; default: 1s when --retry > 0)", Value: b.config.RetryDelay},
-			&cli.BoolFlag{Name: "fail-on-graphql-errors", Usage: "Exit non-zero when response.errors is present", Value: b.config.FailOnGraphQLErrors},
+			&cli.BoolFlag{Name: "strict", Usage: "Exit non-zero when response.errors is present (default true; use --strict=false to disable)", Value: b.config.Strict},
 			&cli.BoolFlag{
 				Name:    "args",
 				Aliases: []string{"a"},
@@ -408,7 +408,7 @@ func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 			&cli.IntFlag{Name: "timeout", Usage: "Request timeout in seconds (default: 30)", Value: b.config.Timeout},
 			&cli.IntFlag{Name: "retry", Usage: "Retry count for transient failures (connection errors, 408, 429, 5xx; default: 0)", Value: b.config.RetryCount},
 			&cli.DurationFlag{Name: "retry-delay", Usage: "Delay between retries (e.g. 500ms, 2s; default: 1s when --retry > 0)", Value: b.config.RetryDelay},
-			&cli.BoolFlag{Name: "fail-on-graphql-errors", Usage: "Exit non-zero when response.errors is present", Value: b.config.FailOnGraphQLErrors},
+			&cli.BoolFlag{Name: "strict", Usage: "Exit non-zero when response.errors is present (default true; use --strict=false to disable)", Value: b.config.Strict},
 			&cli.StringFlag{
 				Name:  "filter",
 				Usage: "Filter types by name (case-insensitive substring match)",
@@ -542,7 +542,7 @@ func (b *CLIBuilder) GetQueriesCommand() *cli.Command {
 			&cli.IntFlag{Name: "timeout", Usage: "Request timeout in seconds (default: 30)", Value: b.config.Timeout},
 			&cli.IntFlag{Name: "retry", Usage: "Retry count for transient failures (connection errors, 408, 429, 5xx; default: 0)", Value: b.config.RetryCount},
 			&cli.DurationFlag{Name: "retry-delay", Usage: "Delay between retries (e.g. 500ms, 2s; default: 1s when --retry > 0)", Value: b.config.RetryDelay},
-			&cli.BoolFlag{Name: "fail-on-graphql-errors", Usage: "Exit non-zero when response.errors is present", Value: b.config.FailOnGraphQLErrors},
+			&cli.BoolFlag{Name: "strict", Usage: "Exit non-zero when response.errors is present (default true; use --strict=false to disable)", Value: b.config.Strict},
 			&cli.BoolFlag{
 				Name:  "desc",
 				Usage: "Include field descriptions",
@@ -655,7 +655,7 @@ func (b *CLIBuilder) GetMutationsCommand() *cli.Command {
 			&cli.IntFlag{Name: "timeout", Usage: "Request timeout in seconds (default: 30)", Value: b.config.Timeout},
 			&cli.IntFlag{Name: "retry", Usage: "Retry count for transient failures (connection errors, 408, 429, 5xx; default: 0)", Value: b.config.RetryCount},
 			&cli.DurationFlag{Name: "retry-delay", Usage: "Delay between retries (e.g. 500ms, 2s; default: 1s when --retry > 0)", Value: b.config.RetryDelay},
-			&cli.BoolFlag{Name: "fail-on-graphql-errors", Usage: "Exit non-zero when response.errors is present", Value: b.config.FailOnGraphQLErrors},
+			&cli.BoolFlag{Name: "strict", Usage: "Exit non-zero when response.errors is present (default true; use --strict=false to disable)", Value: b.config.Strict},
 			&cli.BoolFlag{
 				Name:  "desc",
 				Usage: "Include field descriptions",
@@ -806,9 +806,9 @@ func (b *CLIBuilder) getOperationFlags() []cli.Flag {
 			Value: b.config.RetryDelay,
 		},
 		&cli.BoolFlag{
-			Name:  "fail-on-graphql-errors",
-			Usage: "Exit non-zero when response.errors is present",
-			Value: b.config.FailOnGraphQLErrors,
+			Name:  "strict",
+			Usage: "Exit non-zero when response.errors is present (default true; use --strict=false to disable)",
+			Value: b.config.Strict,
 		},
 		&cli.StringFlag{
 			Name:     "query",

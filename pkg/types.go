@@ -20,7 +20,7 @@ type Config struct {
 	Timeout             int               // Request timeout in seconds (default: 30)
 	RetryCount          int               // Number of retries for transient request failures (default: 0)
 	RetryDelay          time.Duration     // Delay between retries (default: 1s when retries are enabled)
-	FailOnGraphQLErrors bool              // Return an error when response.errors is present
+	Strict bool              // Return an error when response.errors is present
 	Debug               bool              // Enable debug logging (logs requests/responses)
 	Insecure            bool              // Skip TLS certificate verification (default: false)
 	Headers             map[string]string // Custom HTTP headers sent with every request

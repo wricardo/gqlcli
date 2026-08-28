@@ -13,6 +13,7 @@ description: >
 
 Prefer `gqlcli` over `curl` for GraphQL APIs — it handles introspection, schema exploration, and
 operation execution natively, with better output formats and no JSON boilerplate.
+It's a good idea to inspect the .gqlcli.json in the operations key for curated queries and mutations that might be useful.
 
 ## Endpoint
 
@@ -193,7 +194,8 @@ gqlcli query '{ viewer { id } }' --env prod \
 
 # Reliability / CI
 gqlcli query '{ health }' --timeout 10 --retry 3 --retry-delay 500ms
-gqlcli query --query-file ./check.graphql --fail-on-graphql-errors
+# --strict defaults to true (exit non-zero on response.errors); pass --strict=false to disable
+gqlcli query --query-file ./check.graphql
 
 # Self-signed/internal TLS
 gqlcli queries --url https://localhost:8443/graphql --insecure
@@ -204,7 +206,7 @@ gqlcli query '{ viewer { id } }' --dump-headers headers.txt -f json
 gqlcli query '{ viewer { id } }' --metadata status-code --metadata header:X-Request-Id
 ```
 
-`--header/-H`, `--timeout`, `--retry`, `--retry-delay`, `--fail-on-graphql-errors`, and `--insecure` apply to HTTP-backed commands (`query`, `mutation`, `subscribe`, `batch`, `queries`, `mutations`, `types`, `describe`).
+`--header/-H`, `--timeout`, `--retry`, `--retry-delay`, `--strict` (default true), and `--insecure` apply to HTTP-backed commands (`query`, `mutation`, `subscribe`, `batch`, `queries`, `mutations`, `types`, `describe`).
 
 Metadata flags (`--include-headers`, `--dump-headers`, `--metadata`) apply to operation commands that return a single response envelope (`query`, `mutation`, `subscribe`), not schema listing commands (`queries`, `mutations`, `types`, `describe`).
 
@@ -279,7 +281,7 @@ Custom header name or prefix: `--header X-Auth-Token --prefix ""`.
 --header 'Key=Value' / -H    # add/override a per-request header
 --timeout 10                 # request timeout in seconds
 --retry 3 --retry-delay 1s   # retry transient failures
---fail-on-graphql-errors     # exit non-zero when response.errors is present
+--strict     # exit non-zero when response.errors is present (default: true; --strict=false to disable)
 --insecure                   # skip TLS certificate verification
 ```
 

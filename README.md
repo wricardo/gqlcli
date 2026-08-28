@@ -108,7 +108,7 @@ gqlcli queries --filter user -f compact         # Minimal JSON
 - Custom HTTP headers per environment
 - Debug mode for request/response logging
 - Per-request `--header/-H` overrides for one-off auth, tenant, trace, or preview headers
-- Curl-style HTTP controls: `--timeout`, `--retry`, `--retry-delay`, `--fail-on-graphql-errors`, and `--insecure`
+- Curl-style HTTP controls: `--timeout`, `--retry`, `--retry-delay`, `--strict` (default true), and `--insecure`
 - Response metadata inspection with `--include-headers`, `--dump-headers`, and repeatable `--metadata` selectors
 
 ### 📝 Input Methods
@@ -208,8 +208,11 @@ gqlcli query '{ viewer { id } }' \
 # Bound latency and retry transient failures
 gqlcli query '{ health }' --timeout 10 --retry 3 --retry-delay 500ms
 
-# CI: fail non-zero when the GraphQL response includes an errors array
-gqlcli query --query-file ./checks/schema.graphql --fail-on-graphql-errors
+# Exits non-zero by default when the GraphQL response includes an errors array (CI-friendly)
+gqlcli query --query-file ./checks/schema.graphql
+
+# Opt out of that (e.g. to inspect partial data even when errors are present)
+gqlcli query --query-file ./checks/schema.graphql --strict=false
 
 # Internal/self-signed TLS endpoints
 gqlcli queries --url https://localhost:8443/graphql --insecure
@@ -469,7 +472,7 @@ gqlcli types --output types.json
 --timeout SECONDS            Request timeout (default: 30)
 --retry N                    Retry transient failures
 --retry-delay DURATION       Delay between retries (e.g. 500ms, 2s)
---fail-on-graphql-errors     Exit non-zero when response.errors is present
+--strict     Exit non-zero when response.errors is present (default: true; use --strict=false to disable)
 --insecure                   Skip TLS certificate verification
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
 --env VALUE                  Environment from .gqlcli.json
@@ -494,7 +497,7 @@ gqlcli types --output types.json
 --timeout SECONDS            Request timeout (default: 30)
 --retry N                    Retry transient failures
 --retry-delay DURATION       Delay between retries (e.g. 500ms, 2s)
---fail-on-graphql-errors     Exit non-zero when response.errors is present
+--strict     Exit non-zero when response.errors is present (default: true; use --strict=false to disable)
 --insecure                   Skip TLS certificate verification
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
 --env VALUE                  Environment from .gqlcli.json
@@ -539,7 +542,7 @@ Saved operations live in `.gqlcli.json` and run with `gqlcli query --op NAME`, `
 --timeout SECONDS            Request timeout (default: 30)
 --retry N                    Retry transient failures
 --retry-delay DURATION       Delay between retries
---fail-on-graphql-errors     Exit non-zero when any response.errors is present
+--strict     Exit non-zero when any response.errors is present (default: true; use --strict=false to disable)
 --insecure                   Skip TLS certificate verification
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
 --env VALUE                  Environment from .gqlcli.json

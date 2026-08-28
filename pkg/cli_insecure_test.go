@@ -18,7 +18,7 @@ func TestApplyEnvConfigSetsInsecureFromFlag(t *testing.T) {
 		&cli.IntFlag{Name: "timeout"},
 		&cli.IntFlag{Name: "retry"},
 		&cli.DurationFlag{Name: "retry-delay"},
-		&cli.BoolFlag{Name: "fail-on-graphql-errors"},
+		&cli.BoolFlag{Name: "strict"},
 	}
 	for _, f := range flags {
 		if err := f.Apply(set); err != nil {

@@ -283,7 +283,7 @@ func (c *HTTPClient) executeOperation(ctx context.Context, query string, variabl
 	// Check for errors in response; enrich with schema hints and optionally return as typed error.
 	if rawErrors, ok := result["errors"].([]interface{}); ok && len(rawErrors) > 0 {
 		c.enrichErrors(ctx, rawErrors)
-		if c.config.FailOnGraphQLErrors {
+		if c.config.Strict {
 			return result, &GraphQLResponseError{Response: result, Query: query}
 		}
 	}

@@ -304,10 +304,10 @@ func TestQueryCommand_IncludeHeadersFlagAfterPositional_EndToEnd(t *testing.T) {
 	}
 }
 
-// TestQueryCommand_FailOnGraphQLErrorsFlagAfterPositional_EndToEnd proves
-// --fail-on-graphql-errors placed after the query string still causes
+// TestQueryCommand_StrictFlagAfterPositional_EndToEnd proves
+// --strict placed after the query string still causes
 // app.Run to return a non-zero exit when the response contains errors.
-func TestQueryCommand_FailOnGraphQLErrorsFlagAfterPositional_EndToEnd(t *testing.T) {
+func TestQueryCommand_StrictFlagAfterPositional_EndToEnd(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"errors":[{"message":"boom"}]}`))
@@ -318,7 +318,7 @@ func TestQueryCommand_FailOnGraphQLErrorsFlagAfterPositional_EndToEnd(t *testing
 	app := &cli.App{Name: "gqlcli"}
 	var out bytes.Buffer
 	app.Writer = &out
-	// cli.Exit errors (returned by handleError for fail-on-graphql-errors)
+	// cli.Exit errors (returned by handleError for strict)
 	// trigger urfave/cli's default ExitErrHandler, which calls os.Exit and
 	// would kill the test process. Override it so the error is simply
 	// returned from app.Run instead.
@@ -328,10 +328,10 @@ func TestQueryCommand_FailOnGraphQLErrorsFlagAfterPositional_EndToEnd(t *testing
 	args := ReorderOSArgs([]string{
 		"gqlcli", "query", "{ ok }",
 		"--url", server.URL,
-		"--fail-on-graphql-errors",
+		"--strict",
 	}, app.Commands)
 	if err := app.Run(args); err == nil {
-		t.Fatal("app.Run() error = nil, want non-nil (fail-on-graphql-errors)")
+		t.Fatal("app.Run() error = nil, want non-nil (strict)")
 	}
 }
 
