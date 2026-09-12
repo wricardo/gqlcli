@@ -105,6 +105,7 @@ Use `script` when you need loops/branching and multiple GraphQL calls in one flo
 ```bash
 gqlcli script --file ./disableUsers.js
 gqlcli script --file ./job.js --arg '{"tenantId":"acme"}'
+gqlcli script --op disable-inactive-users
 ```
 
 Script shape:
@@ -131,6 +132,16 @@ Helpers available in scripts:
 - `gql.each(items, worker, { concurrency?, stopOnError?, onError? })`
 
 `run` can be synchronous or async (`async function run(gql, input) { ... }`).
+
+Save reusable scripts inline in `.gqlcli.json` and run by name:
+
+```bash
+gqlcli script save --name disable-inactive-users --source-file ./disableUsers.js \
+  --defaults '{"concurrency":5}' --description 'Disable inactive users'
+gqlcli script list
+gqlcli script show --name disable-inactive-users
+gqlcli script --op disable-inactive-users --arg '{"concurrency":10}'
+```
 
 ## Subscribe to events
 

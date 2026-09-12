@@ -205,6 +205,9 @@ gqlcli script --file ./scripts/disableUsers.js
 
 # Pass structured input
 gqlcli script --file ./scripts/job.js --arg '{"tenantId":"acme"}'
+
+# Run saved inline script from .gqlcli.json scripts
+gqlcli script --op disable-inactive-users
 ```
 
 Example script:
@@ -240,6 +243,17 @@ Available helpers inside scripts:
 - `success` — successful worker calls
 - `failed` — failed worker calls
 - `errors` — array of `{ index, error }`
+
+Save reusable inline scripts in `.gqlcli.json`:
+
+```bash
+gqlcli script save --name disable-inactive-users --source-file ./scripts/disableUsers.js \
+  --defaults '{"concurrency":5}' --description 'Disable inactive users'
+
+gqlcli script list
+gqlcli script show --name disable-inactive-users
+gqlcli script --op disable-inactive-users --arg '{"concurrency":10}'
+```
 
 ### HTTP Controls
 
@@ -479,6 +493,32 @@ Subscriptions are stored with `"type": "subscription"`, reusing the `query` fiel
 
 Use `--operation` when selecting a GraphQL operation from a multi-operation document. Use `--op` when running a saved operation from `.gqlcli.json`.
 
+### Saved Inline Scripts
+
+Store reusable JavaScript workflows under the `scripts` key in `.gqlcli.json`.
+Unlike operations, scripts are stored inline (not as file paths), so they travel with project config.
+
+```json
+{
+  "scripts": {
+    "disable-inactive-users": {
+      "lang": "javascript",
+      "function": "run",
+      "source": "async function run(gql, input) { /* ... */ }",
+      "defaults": { "concurrency": 5 },
+      "description": "Disable inactive users"
+    }
+  }
+}
+```
+
+Run with:
+
+```bash
+gqlcli script --op disable-inactive-users
+gqlcli script --op disable-inactive-users --arg '{"concurrency":10}'
+```
+
 ### Advanced: Save Results to File
 
 ```bash
@@ -578,6 +618,20 @@ gqlcli op delete --name NAME
 ```
 
 Saved operations live in `.gqlcli.json` and run with `gqlcli query --op NAME`, `gqlcli mutation --op NAME`, or `gqlcli subscribe --op NAME`.
+
+### `script` Command
+```
+gqlcli script --file PATH [--function NAME] [--arg JSON | --arg-file PATH]
+gqlcli script --source 'async function run(gql){...}'
+gqlcli script --op NAME
+
+gqlcli script save --name NAME (--source JS | --source-file PATH) [--function NAME] [--defaults JSON] [--description TEXT]
+gqlcli script list
+gqlcli script show --name NAME
+gqlcli script delete --name NAME
+```
+
+Saved scripts live inline under `.gqlcli.json` `scripts` and run with `gqlcli script --op NAME`.
 
 ### `batch` Command
 ```

@@ -27,6 +27,7 @@ type ProjectConfig struct {
 	Default      string                    `json:"default"`
 	Environments map[string]EnvConfig      `json:"environments"`
 	Operations   map[string]NamedOperation `json:"operations,omitempty"`
+	Scripts      map[string]NamedScript    `json:"scripts,omitempty"`
 }
 
 // NamedOperation is a saved GraphQL query, mutation, or subscription stored in .gqlcli.json.
@@ -36,6 +37,15 @@ type NamedOperation struct {
 	Query    string                 `json:"query,omitempty"`    // set when Type == "query"; also accepted for Type == "subscription"
 	Mutation string                 `json:"mutation,omitempty"` // set when Type == "mutation"
 	Defaults map[string]interface{} `json:"defaults,omitempty"` // default variables; --variables overrides
+}
+
+// NamedScript is an inline JavaScript workflow stored in .gqlcli.json.
+type NamedScript struct {
+	Lang        string                 `json:"lang,omitempty"`     // currently "javascript"
+	Function    string                 `json:"function,omitempty"` // default function name; defaults to run
+	Source      string                 `json:"source"`             // inline script source code
+	Defaults    map[string]interface{} `json:"defaults,omitempty"` // default input object; --arg overrides
+	Description string                 `json:"description,omitempty"`
 }
 
 // EnvConfig holds per-environment connection settings.

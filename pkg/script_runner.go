@@ -18,13 +18,17 @@ func NewScriptRunner(client Client) *ScriptRunner {
 }
 
 // RunFile executes a JavaScript file and calls fnName(gql, input).
-// The gql argument exposes helpers: query, mutation, request, each.
 func (r *ScriptRunner) RunFile(ctx context.Context, filePath, fnName string, input interface{}) (interface{}, error) {
 	src, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read script file: %w", err)
 	}
+	return r.RunSource(ctx, filePath, string(src), fnName, input)
+}
 
+// RunSource executes JavaScript source and calls fnName(gql, input).
+// The gql argument exposes helpers: query, mutation, request, each.
+func (r *ScriptRunner) RunSource(ctx context.Context, sourceName, source, fnName string, input interface{}) (interface{}, error) {
 	rt := goja.New()
 	rt.Set("console", map[string]func(...interface{}){
 		"log":   func(args ...interface{}) { fmt.Fprintln(os.Stdout, args...) },
@@ -102,7 +106,7 @@ func (r *ScriptRunner) RunFile(ctx context.Context, filePath, fnName string, inp
 		return nil, fmt.Errorf("failed to register script helpers: %w", err)
 	}
 
-	if _, err := rt.RunScript(filePath, string(src)); err != nil {
+	if _, err := rt.RunScript(sourceName, source); err != nil {
 		return nil, fmt.Errorf("failed to evaluate script: %w", err)
 	}
 

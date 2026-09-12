@@ -76,6 +76,7 @@ TYPICAL AI WORKFLOW
   6. Script complex workflows with JavaScript (async/await + concurrency):
        gqlcli script --file ./disableUsers.js
        gqlcli script --file ./disableUsers.js --arg '{"tenantId":"acme"}'
+       gqlcli script --op disable-inactive-users
 
 OUTPUT FORMATS
   toon     Default. Readable tree output, good for terminal inspection.

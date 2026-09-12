@@ -223,3 +223,77 @@ func TestScriptCommand_EachHelper(t *testing.T) {
 		t.Fatalf("output = %q, want gql.each summary", out.String())
 	}
 }
+
+func TestScriptCommand_SaveAndRunByOp_InlineSource(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		calls++
+		_, _ = w.Write([]byte(`{"data":{"ok":true}}`))
+	}))
+	defer server.Close()
+
+	tmp := t.TempDir()
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("chdir tmp: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldwd)
+	})
+
+	cfg := &Config{URL: server.URL, Timeout: 5, Strict: true}
+	builder := NewCLIBuilder(cfg)
+	app := cli.NewApp()
+	builder.RegisterCommands(app)
+
+	source := `async function run(gql, input) {
+  await gql.query("query { ok }");
+  return { tenantId: input.tenantId, concurrency: input.concurrency };
+}`
+
+	if err := RunApp(app, []string{
+		"gqlcli", "script", "save",
+		"--name", "tenant-job",
+		"--source", source,
+		"--defaults", `{"tenantId":"acme","concurrency":2}`,
+		"--description", "test job",
+	}); err != nil {
+		t.Fatalf("script save failed: %v", err)
+	}
+
+	content, err := os.ReadFile(".gqlcli.json")
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if !strings.Contains(string(content), `"scripts"`) || !strings.Contains(string(content), `"tenant-job"`) {
+		t.Fatalf("saved config missing scripts entry: %s", string(content))
+	}
+	if !strings.Contains(string(content), `"source"`) {
+		t.Fatalf("saved config missing inline source: %s", string(content))
+	}
+
+	var out bytes.Buffer
+	app.Writer = &out
+	if err := RunApp(app, []string{
+		"gqlcli", "script",
+		"--url", server.URL,
+		"--op", "tenant-job",
+		"--arg", `{"concurrency":5}`,
+	}); err != nil {
+		t.Fatalf("script --op failed: %v", err)
+	}
+
+	if calls == 0 {
+		t.Fatalf("expected GraphQL call from script")
+	}
+	if !strings.Contains(out.String(), `"tenantId": "acme"`) {
+		t.Fatalf("output = %q, want default tenantId", out.String())
+	}
+	if !strings.Contains(out.String(), `"concurrency": 5`) {
+		t.Fatalf("output = %q, want overridden concurrency", out.String())
+	}
+}
