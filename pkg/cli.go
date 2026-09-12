@@ -747,6 +747,7 @@ func (b *CLIBuilder) RegisterCommands(app *cli.App) {
 		b.GetDescribeCommand(),
 		b.GetQueriesCommand(),
 		b.GetMutationsCommand(),
+		b.GetScriptCommand(),
 		b.GetInstallSkillCommand(),
 		b.GetConfigCommand(),
 		b.GetLoginCommand(),

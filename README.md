@@ -86,6 +86,7 @@ gqlcli queries --filter user -f compact         # Minimal JSON
 - **`mutation`** — Execute mutations with auto-wrapped input objects
 - **`subscribe`** — Stream GraphQL subscription events over WebSocket (`graphql-transport-ws`)
 - **`batch`** — Execute multiple operations in one request (NDJSON or JSON array) with jq filtering
+- **`script`** — Run JavaScript workflow scripts with async/await and `gql.each()` concurrency control
 - **`op`** — Save, list, show, and delete named operations in `.gqlcli.json`
 - **`types`** — List all schema types with filtering
 - **`describe`** — Print SDL definition of a named type
@@ -194,9 +195,55 @@ gqlcli mutation \
 gqlcli mutation --op create-user --input '{"name":"Alice","email":"alice@example.com"}'
 ```
 
+### JavaScript Scripting
+
+Use `script` when you need imperative workflows (loops/conditions) instead of shell piping with `jq` and `xargs`.
+
+```bash
+# Run a script file (calls run(gql, input))
+gqlcli script --file ./scripts/disableUsers.js
+
+# Pass structured input
+gqlcli script --file ./scripts/job.js --arg '{"tenantId":"acme"}'
+```
+
+Example script:
+
+```js
+async function run(gql) {
+  const res = await gql.query("query { users { id active } }")
+  const inactive = res.data.users.filter((u) => !u.active)
+
+  return await gql.each(
+    inactive,
+    async (user) => {
+      await gql.mutation(
+        "mutation Disable($id: ID!) { disableUser(id: $id) { ok } }",
+        { id: user.id }
+      )
+    },
+    { concurrency: 5, stopOnError: false }
+  )
+}
+```
+
+Available helpers inside scripts:
+- `gql.query(query, variables?, operationName?)`
+- `gql.mutation(mutation, variables?, operationName?)`
+- `gql.request({ type, query|mutation, variables, operationName })`
+- `gql.each(items, worker, { concurrency?, stopOnError?, onError? })`
+
+`run` can be synchronous or async (`async function run(gql, input) { ... }`).
+
+`gql.each()` returns a summary object:
+- `total` — number of items
+- `success` — successful worker calls
+- `failed` — failed worker calls
+- `errors` — array of `{ index, error }`
+
 ### HTTP Controls
 
-Use curl-style transport flags when scripts need one-off request customization or CI-friendly failure behavior. These flags work on HTTP-backed commands such as `query`, `mutation`, `subscribe`, `batch`, `queries`, `mutations`, `types`, and `describe`.
+Use curl-style transport flags when scripts need one-off request customization or CI-friendly failure behavior. These flags work on HTTP-backed commands such as `query`, `mutation`, `subscribe`, `batch`, `script`, `queries`, `mutations`, `types`, and `describe`.
 
 ```bash
 # Per-request headers override headers from the selected .gqlcli.json environment

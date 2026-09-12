@@ -33,7 +33,7 @@ func main() {
 		Name:    "gqlcli",
 		Usage:   "GraphQL CLI — Query and explore any GraphQL API",
 		Version: cliVersion(),
-		Description: `gqlcli executes GraphQL queries, mutations, and subscriptions, and explores schemas from any GraphQL endpoint.
+		Description: `gqlcli executes GraphQL queries, mutations, subscriptions, and JavaScript workflow scripts, and explores schemas from any GraphQL endpoint.
 
 TYPICAL AI WORKFLOW
   1. Discover available operations:
@@ -72,6 +72,10 @@ TYPICAL AI WORKFLOW
 
        # JSON array transport (single POST, returns a JSON array)
        gqlcli batch --array --file operations.json
+
+  6. Script complex workflows with JavaScript (async/await + concurrency):
+       gqlcli script --file ./disableUsers.js
+       gqlcli script --file ./disableUsers.js --arg '{"tenantId":"acme"}'
 
 OUTPUT FORMATS
   toon     Default. Readable tree output, good for terminal inspection.

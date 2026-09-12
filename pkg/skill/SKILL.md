@@ -3,9 +3,10 @@ name: gqlcli
 description: >
   User manual for gqlcli — a GraphQL CLI tool for querying and exploring any GraphQL API.
   Use when asked to: execute GraphQL queries or mutations, explore a GraphQL schema,
-  list available queries or mutations, filter GraphQL types, or run any operation against a
-  GraphQL endpoint from the command line. Triggers on mentions of gqlcli, "run a graphql query",
-  "list graphql mutations", "get the schema", "explore graphql api", or any task involving
+  list available queries or mutations, filter GraphQL types, run JavaScript workflow scripts
+  (async/await + gql.each), or run any operation against a GraphQL endpoint from the command line.
+  Triggers on mentions of gqlcli, "run a graphql query", "list graphql mutations",
+  "get the schema", "explore graphql api", "script this workflow", or any task involving
   querying a GraphQL endpoint via the CLI.
 ---
 
@@ -96,6 +97,40 @@ gqlcli mutation \
   --mutation-file ./createUser.graphql \
   --variables '{"input":{"name":"Alice"}}'
 ```
+
+## Script imperative workflows (JavaScript)
+
+Use `script` when you need loops/branching and multiple GraphQL calls in one flow (instead of `jq` + shell loops).
+
+```bash
+gqlcli script --file ./disableUsers.js
+gqlcli script --file ./job.js --arg '{"tenantId":"acme"}'
+```
+
+Script shape:
+
+```js
+async function run(gql, input) {
+  const res = await gql.query("query { users { id active } }")
+  const inactive = res.data.users.filter((u) => !u.active)
+
+  return await gql.each(
+    inactive,
+    async (u) => {
+      await gql.mutation("mutation Disable($id: ID!) { disableUser(id: $id) { ok } }", { id: u.id })
+    },
+    { concurrency: 5, stopOnError: false }
+  )
+}
+```
+
+Helpers available in scripts:
+- `gql.query(query, variables?, operationName?)`
+- `gql.mutation(mutation, variables?, operationName?)`
+- `gql.request({ type, query|mutation, variables, operationName })`
+- `gql.each(items, worker, { concurrency?, stopOnError?, onError? })`
+
+`run` can be synchronous or async (`async function run(gql, input) { ... }`).
 
 ## Subscribe to events
 
@@ -206,7 +241,7 @@ gqlcli query '{ viewer { id } }' --dump-headers headers.txt -f json
 gqlcli query '{ viewer { id } }' --metadata status-code --metadata header:X-Request-Id
 ```
 
-`--header/-H`, `--timeout`, `--retry`, `--retry-delay`, `--strict` (default true), and `--insecure` apply to HTTP-backed commands (`query`, `mutation`, `subscribe`, `batch`, `queries`, `mutations`, `types`, `describe`).
+`--header/-H`, `--timeout`, `--retry`, `--retry-delay`, `--strict` (default true), and `--insecure` apply to HTTP-backed commands (`query`, `mutation`, `subscribe`, `batch`, `script`, `queries`, `mutations`, `types`, `describe`).
 
 Metadata flags (`--include-headers`, `--dump-headers`, `--metadata`) apply to operation commands that return a single response envelope (`query`, `mutation`, `subscribe`), not schema listing commands (`queries`, `mutations`, `types`, `describe`).
 
