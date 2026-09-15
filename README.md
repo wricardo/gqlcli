@@ -828,18 +828,56 @@ runtime itself, not just in-flight HTTP calls, so `while (true) {}` is recoverab
 caused by cancellation wrap `ErrScriptInterrupted`, which distinguishes them from a script
 that threw.
 
-**Policy.** `WithReadOnly` and `WithApprover` are enforced per dispatched operation, after
-the operation is parsed — unlike scanning the source text for the word `mutation`, which
-both false-positives on string literals and misses `gql.request({type: "mutation"})` or any
-document the script assembles at runtime. Rejections surface in JavaScript as catchable
-throws, so a script can handle a declined mutation instead of dying:
+**Policy.** `WithReadOnly` and `WithApprover` are enforced per dispatched operation, and the
+operation's kind comes from **parsing the document** — not from which helper the script
+called, and not from scanning the text for the word `mutation`. So all of these are blocked
+under `WithReadOnly`:
+
+```js
+gql.mutation("mutation { deleteUser(id: 1) { ok } }")
+gql.request({ type: "mutation", mutation: "mutation { ... }" })
+gql.query("mutation Evil { deleteEverything { ok } }")        // the helper lies; the document does not
+```
+
+…while a query merely *mentioning* the word is not blocked:
+
+```js
+gql.query('query { search(term: "run the mutation now") { id } }')
+```
+
+A document that cannot be parsed is refused rather than sent whenever a policy is in force,
+since an unclassifiable operation is the one thing a read-only policy must not wave through.
+With no policy configured, the server stays the authority, as before.
+
+`RequireOperationKind(document, kind)` and `DocumentOperationKind(document)` are exported so
+a host can apply the same check to documents it dispatches itself.
+
+Rejections surface in JavaScript as catchable throws, so a script can handle a declined
+mutation instead of dying:
 
 ```js
 try { gql.mutation("mutation { deleteUser(id: 1) { ok } }") }
 catch (e) { console.log("declined:", String(e)) }
 ```
 
-Callbacks receive a copy of `RequestInfo.Variables`, so a hook cannot alter what is sent.
+Callbacks receive a copy of `RequestInfo.Variables`, so a hook cannot alter what is sent, and
+they run on the single goroutine driving the JavaScript runtime — `gql.each` interleaves its
+workers inside that one runtime, so callbacks need no locking of their own.
+
+**Your own transport.** `NewScriptRunner` takes `OperationExecutor`, which is just
+`Execute` and `ExecuteMutation` — the two methods it actually calls. Adapting an in-house
+HTTP client does not require stubbing out schema introspection or response metadata:
+
+```go
+type myExecutor struct{ c *house.Client }
+
+func (m myExecutor) Execute(ctx context.Context, _ gqlcli.ExecutionMode, o gqlcli.QueryOptions) (map[string]any, error) {
+	return m.c.Do(ctx, o.Query, o.Variables)
+}
+func (m myExecutor) ExecuteMutation(ctx context.Context, _ gqlcli.ExecutionMode, o gqlcli.MutationOptions) (map[string]any, error) {
+	return m.c.Do(ctx, o.Mutation, o.Variables)
+}
+```
 
 **Reusing saved scripts.** `ProjectConfig.ResolveScript(name)` looks up a script from the
 `scripts` section of `.gqlcli.json` and `(*NamedScript).MergeInput` layers caller input over
@@ -852,9 +890,45 @@ result, err := runner.RunSource(ctx, "disable-inactive-users", script.Source, sc
 	script.MergeInput(map[string]interface{}{"concurrency": 10}))
 ```
 
-> **Note:** `ScriptRunner` requires a `Client`, which `NewHTTPClient` satisfies.
-> `*InlineExecutor` does **not** implement `Client` and cannot be passed to
-> `NewScriptRunner` today.
+### Schema discovery from your own transport
+
+`Describer` renders a type as compact SDL, caches each introspection result, and can filter
+fields or expand referenced types. It is the piece to reach for when a model has to read a
+schema before writing a query against it.
+
+`NewDescriberFromExecFunc` builds one from any function that can run an operation, so an
+embedder on its own HTTP stack gets the caching and filtering rather than reimplementing
+introspection around `FormatTypeSDL`:
+
+```go
+d := gqlcli.NewDescriberFromExecFunc(house.DoRaw) // func(ctx, query, vars) (json.RawMessage, error)
+
+// The operations matching a keyword, with their call signatures.
+sdl, err := d.DescribeWithOptions(ctx, "Query", gqlcli.DescribeOptions{
+	FieldFilter: "campaign",
+	ShowArgs:    true,
+})
+
+// What an input type requires.
+sdl, err = d.DescribeWithOptions(ctx, "CreateSmsProviderInput", gqlcli.DescribeOptions{})
+```
+
+The exec func must return the full GraphQL response envelope (the object with the `data`
+key), not just the data payload.
+
+`DescribeOptions.FieldFilter` matches across **fields, input fields and enum values**, so it
+works on object types, input objects and enums alike, and returns `""` when nothing matches
+— which lets a caller tell "no such field" apart from "type has none". `Depth` follows only
+the surviving fields.
+
+> `DescribeWithFieldFilter` is a different, narrower thing: it backs schema-hint error
+> enrichment, so it fixes its own formatting, prepends a `# Closest matches` header and looks
+> at `fields` only. Use `DescribeWithOptions` for general filtering.
+
+> **Note:** `*InlineExecutor` does not implement `Client` and cannot be passed to
+> `NewScriptRunner` today; use `NewHTTPClient` or your own `OperationExecutor`. For
+> `Describer`, `InlineExecutor.ExecuteFunc()` plugs straight into
+> `NewDescriberFromExecFunc`.
 
 ### Inline Mode — GraphQL-Backed CLI Applications
 

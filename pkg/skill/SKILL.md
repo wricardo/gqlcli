@@ -165,12 +165,35 @@ errors.Is(err, gqlcli.ErrScriptInterrupted) // cancelled/timed out vs. a script 
 
 - No options = current CLI behavior (process stdio, no policy).
 - The context interrupts the JS VM itself, not just in-flight HTTP calls.
-- `WithReadOnly`/`WithApprover` are enforced per parsed operation, so they also catch
-  `gql.request({type:"mutation"})`; rejections are catchable throws in JS.
-- Callbacks get a copy of `RequestInfo.Variables` — a hook cannot change what is sent.
+- `WithReadOnly`/`WithApprover` classify by **parsing the document**, not by which helper was
+  called — so `gql.query("mutation Evil { ... }")` is blocked, while a query containing the
+  word "mutation" in a string literal is not. An unparseable document is refused, not sent,
+  whenever a policy is active. Rejections are catchable throws in JS.
+- `RequireOperationKind(doc, kind)` / `DocumentOperationKind(doc)` apply the same check to
+  documents the host dispatches itself.
+- Callbacks get a copy of `RequestInfo.Variables` — a hook cannot change what is sent — and
+  run on the runtime's single goroutine, so they need no locking.
+- `NewScriptRunner` takes `OperationExecutor` (just `Execute` + `ExecuteMutation`), so an
+  in-house client needs no `Introspect`/`LastResponseMetadata` stubs.
 - `ProjectConfig.ResolveScript(name)` + `(*NamedScript).MergeInput(input)` reuse scripts
   saved in `.gqlcli.json`.
 - `*InlineExecutor` does not satisfy `Client`; only `NewHTTPClient` works today.
+
+### Schema discovery from a Go program
+
+`Describer` caches introspection per type and renders compact SDL — the piece to use when a
+model must read the schema before writing a query.
+
+```go
+d := gqlcli.NewDescriberFromExecFunc(house.DoRaw) // func(ctx, query, vars) (json.RawMessage, error)
+sdl, err := d.DescribeWithOptions(ctx, "Query", gqlcli.DescribeOptions{FieldFilter: "campaign", ShowArgs: true})
+```
+
+- The exec func must return the full response envelope (with `data`), not just the payload.
+- `FieldFilter` matches fields, **input fields and enum values**, so it works on input types
+  and enums too; it returns `""` when nothing matches. `Depth` follows only surviving fields.
+- `DescribeWithFieldFilter` is not this — it backs schema-hint errors, fixes its own
+  formatting and looks at `fields` only. Use `DescribeWithOptions` for general filtering.
 
 ## Subscribe to events
 

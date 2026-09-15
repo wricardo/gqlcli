@@ -76,6 +76,104 @@ func NewDescriberFromHTTPClient(c *HTTPClient) *Describer {
 	return d
 }
 
+// NewDescriberFromExecFunc creates a Describer backed by any function that can
+// run a GraphQL operation. Use it to reach Describer — its per-type caching,
+// depth recursion and field filtering — from an embedder's own HTTP stack,
+// rather than reimplementing introspection around FormatTypeSDL.
+//
+// exec must return the full GraphQL response envelope (the object with the
+// "data" key), not just the data payload.
+func NewDescriberFromExecFunc(exec func(ctx context.Context, query string, vars map[string]interface{}) (json.RawMessage, error)) *Describer {
+	return &Describer{exec: exec}
+}
+
+// DescribeOptions controls DescribeWithOptions.
+type DescribeOptions struct {
+	// FieldFilter keeps only members whose name contains it, case-insensitively,
+	// across fields, input fields and enum values. Empty keeps everything.
+	FieldFilter string
+	// ShowArgs expands field argument signatures. Worth enabling for the Query
+	// and Mutation roots, where the arguments are the call signature.
+	ShowArgs bool
+	// ShowDescriptions includes doc comments.
+	ShowDescriptions bool
+	// Depth recursively includes referenced non-scalar types, as DescribeWithDepth.
+	Depth int
+}
+
+// DescribeWithOptions returns SDL for typeName under opts. It returns an empty
+// string when FieldFilter matches nothing, which lets a caller tell "no such
+// field" apart from a type that has none.
+//
+// Filtering happens before formatting, so a type with hundreds of fields can be
+// inspected a slice at a time — handing all of them to a model is the context
+// blowup that filtering exists to prevent. When Depth is set, recursion follows
+// only the surviving fields.
+func (d *Describer) DescribeWithOptions(ctx context.Context, typeName string, opts DescribeOptions) (string, error) {
+	depth := opts.Depth
+	if depth < 0 {
+		depth = 0
+	}
+
+	typeInfo, err := d.fetch(ctx, typeName)
+	if err != nil {
+		return "", err
+	}
+
+	filtered, matched := filterTypeMembers(typeInfo, opts.FieldFilter)
+	if matched == 0 {
+		return "", nil
+	}
+
+	var out strings.Builder
+	seen := map[string]bool{}
+	if err := d.appendTypeSDLRecursive(ctx, &out, filtered, opts.ShowArgs, opts.ShowDescriptions, depth, seen); err != nil {
+		return "", err
+	}
+	return out.String(), nil
+}
+
+// filterTypeMembers returns a shallow copy of typeInfo keeping only members
+// whose name contains filter, and how many survived. A copy is essential: fetch
+// hands back the cached map, and filtering it in place would corrupt every
+// later lookup of that type.
+//
+// The count is -1 when no filter was given, so "unfiltered" is distinguishable
+// from "filtered down to nothing".
+func filterTypeMembers(typeInfo map[string]interface{}, filter string) (map[string]interface{}, int) {
+	filter = strings.ToLower(strings.TrimSpace(filter))
+	if filter == "" {
+		return typeInfo, -1
+	}
+
+	out := make(map[string]interface{}, len(typeInfo))
+	for k, v := range typeInfo {
+		out[k] = v
+	}
+
+	matched := 0
+	for _, key := range []string{"fields", "inputFields", "enumValues"} {
+		entries, ok := typeInfo[key].([]interface{})
+		if !ok {
+			continue
+		}
+		kept := make([]interface{}, 0, len(entries))
+		for _, entry := range entries {
+			member, ok := entry.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			name, _ := member["name"].(string)
+			if strings.Contains(strings.ToLower(name), filter) {
+				kept = append(kept, entry)
+			}
+		}
+		out[key] = kept
+		matched += len(kept)
+	}
+	return out, matched
+}
+
 // Describe returns a compact SDL string for the named type with default formatting
 // (no field argument signatures, no descriptions). Results are cached.
 // For custom formatting options use DescribeWith.

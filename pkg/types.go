@@ -17,13 +17,13 @@ type Config struct {
 	Auth  AuthConfig
 
 	// HTTP client settings
-	Timeout             int               // Request timeout in seconds (default: 30)
-	RetryCount          int               // Number of retries for transient request failures (default: 0)
-	RetryDelay          time.Duration     // Delay between retries (default: 1s when retries are enabled)
-	Strict bool              // Return an error when response.errors is present
-	Debug               bool              // Enable debug logging (logs requests/responses)
-	Insecure            bool              // Skip TLS certificate verification (default: false)
-	Headers             map[string]string // Custom HTTP headers sent with every request
+	Timeout    int               // Request timeout in seconds (default: 30)
+	RetryCount int               // Number of retries for transient request failures (default: 0)
+	RetryDelay time.Duration     // Delay between retries (default: 1s when retries are enabled)
+	Strict     bool              // Return an error when response.errors is present
+	Debug      bool              // Enable debug logging (logs requests/responses)
+	Insecure   bool              // Skip TLS certificate verification (default: false)
+	Headers    map[string]string // Custom HTTP headers sent with every request
 }
 
 // AuthConfig holds authentication configuration
@@ -93,10 +93,19 @@ const (
 	ExecutionModeHTTP
 )
 
-// Client executes GraphQL operations
-type Client interface {
+// OperationExecutor runs GraphQL operations. It is the whole of what
+// ScriptRunner needs, so an embedder adapting its own HTTP stack can satisfy it
+// without writing stubs for schema introspection or response metadata.
+type OperationExecutor interface {
 	Execute(ctx context.Context, mode ExecutionMode, opts QueryOptions) (map[string]interface{}, error)
 	ExecuteMutation(ctx context.Context, mode ExecutionMode, opts MutationOptions) (map[string]interface{}, error)
+}
+
+// Client executes GraphQL operations and can describe the schema behind them.
+// It is what the CLI commands need; ScriptRunner asks only for
+// OperationExecutor.
+type Client interface {
+	OperationExecutor
 	Introspect(ctx context.Context) (map[string]interface{}, error)
 	LastResponseMetadata() *ResponseMetadata
 }

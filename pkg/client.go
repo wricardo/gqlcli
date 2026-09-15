@@ -14,12 +14,12 @@ import (
 )
 
 var (
-	reErrUnknownOutput = regexp.MustCompile(`Cannot query field "([^"]+)" on type "([^"]+)"`)
-	reErrOutputField   = regexp.MustCompile(`Cannot query field "[^"]+" on type "([^"]+)"`)
-	reErrInputField    = regexp.MustCompile(`Field "[^"]+" is not defined by type "([^"]+)"`)
-	reErrUnknownArg    = regexp.MustCompile(`Unknown argument "[^"]+" on field "([^.]+)\.[^"]+"`)
-	reErrUnknownArgOnField = regexp.MustCompile(`Unknown argument "[^"]+" on field "([^.]+)\.([^"]+)"`)
-	reErrNeedsSubfield = regexp.MustCompile(`Field "[^"]+" of type "([^"]+)" must have a selection of subfields`)
+	reErrUnknownOutput      = regexp.MustCompile(`Cannot query field "([^"]+)" on type "([^"]+)"`)
+	reErrOutputField        = regexp.MustCompile(`Cannot query field "[^"]+" on type "([^"]+)"`)
+	reErrInputField         = regexp.MustCompile(`Field "[^"]+" is not defined by type "([^"]+)"`)
+	reErrUnknownArg         = regexp.MustCompile(`Unknown argument "[^"]+" on field "([^.]+)\.[^"]+"`)
+	reErrUnknownArgOnField  = regexp.MustCompile(`Unknown argument "[^"]+" on field "([^.]+)\.([^"]+)"`)
+	reErrNeedsSubfield      = regexp.MustCompile(`Field "[^"]+" of type "([^"]+)" must have a selection of subfields`)
 	reErrNeedsSubfieldField = regexp.MustCompile(`Field "([^"]+)" of type "[^"]+" must have a selection of subfields`)
 )
 
