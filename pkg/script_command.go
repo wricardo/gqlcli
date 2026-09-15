@@ -293,14 +293,11 @@ func resolveScriptSource(c *cli.Context) (sourceName, source, function string, d
 		if cfg == nil {
 			return "", "", "", nil, fmt.Errorf("--op requires .gqlcli.json")
 		}
-		s, ok := cfg.Scripts[opName]
-		if !ok {
-			return "", "", "", nil, fmt.Errorf("script %q not found in .gqlcli.json", opName)
+		s, err := cfg.ResolveScript(opName)
+		if err != nil {
+			return "", "", "", nil, err
 		}
-		if strings.TrimSpace(s.Source) == "" {
-			return "", "", "", nil, fmt.Errorf("script %q has empty source", opName)
-		}
-		if !c.IsSet("function") && strings.TrimSpace(s.Function) != "" {
+		if !c.IsSet("function") {
 			function = s.Function
 		}
 		if function == "" {

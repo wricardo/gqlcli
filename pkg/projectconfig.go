@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // ProjectConfig represents the .gqlcli.json configuration file.
@@ -94,4 +95,30 @@ func (p *ProjectConfig) Resolve(envName string) (*EnvConfig, error) {
 		return nil, fmt.Errorf("environment %q not found in .gqlcli.json", envName)
 	}
 	return &env, nil
+}
+
+// ResolveScript returns the named script from the "scripts" section, with
+// Function defaulted to "run". It lets an embedder reuse scripts saved in
+// .gqlcli.json without reimplementing lookup and validation.
+func (p *ProjectConfig) ResolveScript(name string) (*NamedScript, error) {
+	if name == "" {
+		return nil, fmt.Errorf("script name is required")
+	}
+	s, ok := p.Scripts[name]
+	if !ok {
+		return nil, fmt.Errorf("script %q not found in .gqlcli.json", name)
+	}
+	if strings.TrimSpace(s.Source) == "" {
+		return nil, fmt.Errorf("script %q has empty source", name)
+	}
+	if strings.TrimSpace(s.Function) == "" {
+		s.Function = "run"
+	}
+	return &s, nil
+}
+
+// MergeInput layers the caller's input over the script's Defaults, returning a
+// new map. Keys present in input win.
+func (s *NamedScript) MergeInput(input map[string]interface{}) map[string]interface{} {
+	return mergeVariables(s.Defaults, input)
 }

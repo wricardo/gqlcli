@@ -783,6 +783,79 @@ func main() {
 }
 ```
 
+### Embedding `ScriptRunner` — running JavaScript inside a host program
+
+`ScriptRunner` executes the same JavaScript workflows as the `script` command, but from
+inside your own Go program. This matters when the script text is not written by a human —
+for example when an AI agent authors it and your program runs it.
+
+```go
+client := gqlcli.NewHTTPClient(&gqlcli.Config{URL: endpoint, Timeout: 30})
+
+var logs bytes.Buffer
+runner := gqlcli.NewScriptRunner(client,
+	gqlcli.WithStdout(&logs),            // keep console.log out of your stdout
+	gqlcli.WithStderr(&logs),
+	gqlcli.WithTimeout(30*time.Second),  // a script that never returns cannot hang you
+	gqlcli.WithReadOnly(true),           // reject every mutation
+	gqlcli.WithMaxOperations(200),       // cap a runaway gql.each
+	gqlcli.WithOnRequest(func(info gqlcli.RequestInfo) {
+		log.Printf("%s %s", info.Type, info.OperationName)
+	}),
+)
+
+result, err := runner.RunSource(ctx, "agent.js", source, "run", input)
+if errors.Is(err, gqlcli.ErrScriptInterrupted) {
+	// cancelled or timed out, as opposed to a script bug
+}
+```
+
+`NewScriptRunner(client)` with no options behaves exactly as the CLI does: console output
+goes to the process stdio and no policy is applied.
+
+| Option | Purpose |
+|--------|---------|
+| `WithStdout(w)` / `WithStderr(w)` | Redirect `console.log` / `console.error`. Required if your program reserves its own stdout for structured output. |
+| `WithTimeout(d)` | Bound a single run. Also interrupts the JavaScript VM, so an unbounded loop cannot hang the caller. |
+| `WithMaxOperations(n)` | Cap how many GraphQL operations one run may attempt. Blocked operations count against the budget. |
+| `WithReadOnly(true)` | Reject every mutation, including those issued via `gql.request`. |
+| `WithApprover(fn)` | Gate each operation individually; returning an error aborts just that one. |
+| `WithOnRequest(fn)` | Observe every attempted operation, before any policy check. |
+| `WithOnResponse(fn)` | Observe each operation's outcome — result or error. |
+
+**Cancellation.** The context passed to `RunSource` / `RunFile` interrupts the JavaScript
+runtime itself, not just in-flight HTTP calls, so `while (true) {}` is recoverable. Errors
+caused by cancellation wrap `ErrScriptInterrupted`, which distinguishes them from a script
+that threw.
+
+**Policy.** `WithReadOnly` and `WithApprover` are enforced per dispatched operation, after
+the operation is parsed — unlike scanning the source text for the word `mutation`, which
+both false-positives on string literals and misses `gql.request({type: "mutation"})` or any
+document the script assembles at runtime. Rejections surface in JavaScript as catchable
+throws, so a script can handle a declined mutation instead of dying:
+
+```js
+try { gql.mutation("mutation { deleteUser(id: 1) { ok } }") }
+catch (e) { console.log("declined:", String(e)) }
+```
+
+Callbacks receive a copy of `RequestInfo.Variables`, so a hook cannot alter what is sent.
+
+**Reusing saved scripts.** `ProjectConfig.ResolveScript(name)` looks up a script from the
+`scripts` section of `.gqlcli.json` and `(*NamedScript).MergeInput` layers caller input over
+its defaults, so an embedder does not have to reimplement that:
+
+```go
+cfg, _ := gqlcli.LoadProjectConfig()
+script, err := cfg.ResolveScript("disable-inactive-users")
+result, err := runner.RunSource(ctx, "disable-inactive-users", script.Source, script.Function,
+	script.MergeInput(map[string]interface{}{"concurrency": 10}))
+```
+
+> **Note:** `ScriptRunner` requires a `Client`, which `NewHTTPClient` satisfies.
+> `*InlineExecutor` does **not** implement `Client` and cannot be passed to
+> `NewScriptRunner` today.
+
 ### Inline Mode — GraphQL-Backed CLI Applications
 
 Build GraphQL-native CLI applications where GraphQL is the interface language, not subcommands and flags. This is especially powerful for AI agents that can introspect schemas and construct queries dynamically.

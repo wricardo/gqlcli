@@ -143,6 +143,35 @@ gqlcli script show --name disable-inactive-users
 gqlcli script --op disable-inactive-users --arg '{"concurrency":10}'
 ```
 
+### Embedding the script runner in a Go program
+
+`ScriptRunner` runs the same scripts from inside a host program. Use the options whenever
+the script text is not human-written (e.g. authored by an AI agent):
+
+```go
+client := gqlcli.NewHTTPClient(&gqlcli.Config{URL: endpoint, Timeout: 30})
+runner := gqlcli.NewScriptRunner(client,
+    gqlcli.WithStdout(&logs), gqlcli.WithStderr(&logs), // keep console.log off your stdout
+    gqlcli.WithTimeout(30*time.Second),                 // interrupts `while(true){}`
+    gqlcli.WithReadOnly(true),                          // reject all mutations
+    gqlcli.WithMaxOperations(200),                      // cap a runaway gql.each
+    gqlcli.WithApprover(approve),                       // per-operation gate
+    gqlcli.WithOnRequest(trace),                        // execution trace
+    gqlcli.WithOnResponse(traceResult),
+)
+result, err := runner.RunSource(ctx, "agent.js", source, "run", input)
+errors.Is(err, gqlcli.ErrScriptInterrupted) // cancelled/timed out vs. a script bug
+```
+
+- No options = current CLI behavior (process stdio, no policy).
+- The context interrupts the JS VM itself, not just in-flight HTTP calls.
+- `WithReadOnly`/`WithApprover` are enforced per parsed operation, so they also catch
+  `gql.request({type:"mutation"})`; rejections are catchable throws in JS.
+- Callbacks get a copy of `RequestInfo.Variables` — a hook cannot change what is sent.
+- `ProjectConfig.ResolveScript(name)` + `(*NamedScript).MergeInput(input)` reuse scripts
+  saved in `.gqlcli.json`.
+- `*InlineExecutor` does not satisfy `Client`; only `NewHTTPClient` works today.
+
 ## Subscribe to events
 
 Subscriptions use the GraphQL over WebSocket protocol (`graphql-transport-ws`) and stream NDJSON envelopes. HTTP(S) endpoint URLs are automatically mapped to WS(S).
