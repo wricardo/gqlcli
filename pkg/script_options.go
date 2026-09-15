@@ -83,9 +83,13 @@ func WithMaxOperations(n int) ScriptOption {
 	return func(c *scriptConfig) { c.maxOperations = n }
 }
 
-// WithReadOnly rejects every mutation the script dispatches, including those
-// issued through gql.request. The rejection surfaces in JavaScript as a
-// catchable throw.
+// WithReadOnly rejects every mutation the script dispatches. The kind is taken
+// from the parsed document, not from the helper the script called, so
+// gql.query("mutation { ... }") is blocked too. A document that cannot be
+// parsed is refused rather than sent, since an unclassifiable operation is
+// exactly what a read-only policy must not wave through.
+//
+// The rejection surfaces in JavaScript as a catchable throw.
 func WithReadOnly(readOnly bool) ScriptOption {
 	return func(c *scriptConfig) { c.readOnly = readOnly }
 }
@@ -93,12 +97,17 @@ func WithReadOnly(readOnly bool) ScriptOption {
 // WithOnRequest registers a callback invoked for every operation a script
 // attempts, before any policy check. Operations later blocked by WithReadOnly
 // or WithApprover are reported here too; use WithOnResponse for the outcome.
+//
+// The callback runs on the single goroutine driving the JavaScript runtime, so
+// it needs no locking of its own — gql.each interleaves its workers inside that
+// one runtime rather than spreading them across goroutines.
 func WithOnRequest(fn func(RequestInfo)) ScriptOption {
 	return func(c *scriptConfig) { c.onRequest = fn }
 }
 
 // WithOnResponse registers a callback invoked after each attempted operation
-// settles, with the result or the error that blocked or failed it.
+// settles, with the result or the error that blocked or failed it. Like
+// WithOnRequest, it runs on the runtime's single goroutine.
 func WithOnResponse(fn func(RequestInfo, map[string]interface{}, error)) ScriptOption {
 	return func(c *scriptConfig) { c.onResponse = fn }
 }
@@ -106,6 +115,10 @@ func WithOnResponse(fn func(RequestInfo, map[string]interface{}, error)) ScriptO
 // WithApprover gates each operation after WithReadOnly and the operation
 // budget. Returning a non-nil error aborts that one operation; the script may
 // catch it and continue. Use it to prompt a human or apply a host policy.
+//
+// It runs on the runtime's single goroutine, which is also the goroutine
+// blocked inside RunSource: an approver that waits on a human holds the script
+// still while it waits.
 func WithApprover(fn func(context.Context, RequestInfo) error) ScriptOption {
 	return func(c *scriptConfig) { c.approver = fn }
 }

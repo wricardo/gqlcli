@@ -11,14 +11,14 @@ import (
 
 // ScriptRunner executes JavaScript automation against a GraphQL client.
 type ScriptRunner struct {
-	client Client
+	client OperationExecutor
 	cfg    scriptConfig
 }
 
 // NewScriptRunner builds a runner. With no options it writes console output to
 // the process stdio and imposes no policy. Hosts embedding the runner should at
 // minimum set WithStdout/WithStderr and run under a cancellable context.
-func NewScriptRunner(client Client, opts ...ScriptOption) *ScriptRunner {
+func NewScriptRunner(client OperationExecutor, opts ...ScriptOption) *ScriptRunner {
 	cfg := defaultScriptConfig()
 	for _, opt := range opts {
 		if opt != nil {
@@ -49,6 +49,14 @@ func (s *scriptRun) value(info RequestInfo) goja.Value {
 }
 
 func (s *scriptRun) dispatch(info RequestInfo) (map[string]interface{}, error) {
+	// Trust the document, not the helper the script happened to call:
+	// gql.query("mutation { ... }") is a mutation, and classifying it as a
+	// query would walk it straight past WithReadOnly.
+	kind, unclassified := DocumentOperationKind(info.Operation)
+	if unclassified == nil {
+		info.Type = kind
+	}
+
 	// Callbacks see a copy of the variables so a hook cannot alter what is sent.
 	observed := info
 	observed.Variables = copyVariables(info.Variables)
@@ -58,7 +66,7 @@ func (s *scriptRun) dispatch(info RequestInfo) (map[string]interface{}, error) {
 		cfg.onRequest(observed)
 	}
 
-	result, err := s.gatedExecute(info, observed)
+	result, err := s.gatedExecute(info, observed, unclassified)
 
 	if cfg.onResponse != nil {
 		cfg.onResponse(observed, result, err)
@@ -66,14 +74,21 @@ func (s *scriptRun) dispatch(info RequestInfo) (map[string]interface{}, error) {
 	return result, err
 }
 
-func (s *scriptRun) gatedExecute(send, observed RequestInfo) (map[string]interface{}, error) {
+func (s *scriptRun) gatedExecute(send, observed RequestInfo, unclassified error) (map[string]interface{}, error) {
 	cfg := &s.runner.cfg
 
 	s.ops++
 	if cfg.maxOperations > 0 && s.ops > cfg.maxOperations {
 		return nil, fmt.Errorf("%w: limit is %d", ErrOperationBudget, cfg.maxOperations)
 	}
-	if cfg.readOnly && send.Type == "mutation" {
+	// An unparseable document cannot be judged. Where a policy is in force that
+	// has to be fatal, since letting it through is the one outcome the policy
+	// exists to prevent. Without a policy the server remains the authority, as
+	// it was before.
+	if unclassified != nil && (cfg.readOnly || cfg.approver != nil) {
+		return nil, fmt.Errorf("refusing to run an operation that cannot be classified: %w", unclassified)
+	}
+	if cfg.readOnly && send.Type == OperationMutation {
 		return nil, ErrReadOnly
 	}
 	if cfg.approver != nil {
@@ -82,7 +97,7 @@ func (s *scriptRun) gatedExecute(send, observed RequestInfo) (map[string]interfa
 		}
 	}
 
-	if send.Type == "mutation" {
+	if send.Type == OperationMutation {
 		return s.runner.client.ExecuteMutation(s.ctx, ExecutionModeHTTP, MutationOptions{
 			Mutation:      send.Operation,
 			Variables:     send.Variables,
