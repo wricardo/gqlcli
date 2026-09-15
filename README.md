@@ -925,10 +925,48 @@ the surviving fields.
 > enrichment, so it fixes its own formatting, prepends a `# Closest matches` header and looks
 > at `fields` only. Use `DescribeWithOptions` for general filtering.
 
-> **Note:** `*InlineExecutor` does not implement `Client` and cannot be passed to
-> `NewScriptRunner` today; use `NewHTTPClient` or your own `OperationExecutor`. For
-> `Describer`, `InlineExecutor.ExecuteFunc()` plugs straight into
-> `NewDescriberFromExecFunc`.
+### Running scripts in-process
+
+`NewInlineClient` adapts an `InlineExecutor` to `Client`, so a gqlgen app can run the same
+scripts against its own schema with no HTTP hop and no server:
+
+```go
+exec := gqlcli.NewInlineExecutor(graph.NewExecutableSchema(graph.Config{Resolvers: &graph.Resolver{}}))
+client := gqlcli.NewInlineClient(exec)
+
+runner := gqlcli.NewScriptRunner(client, gqlcli.WithReadOnly(true))
+result, err := runner.RunSource(ctx, "agent.js", source, "run", input)
+
+d := client.Describer() // schema discovery against the same in-process schema
+```
+
+The `ExecutionMode` argument is ignored by `InlineClient` — it selects between transports, and
+an inline client is already one. `LastResponseMetadata` returns nil, since an in-process call
+has no HTTP response.
+
+### Bounding captured output
+
+`LimitWriter` caps what a script can write, which is what actually bounds memory — trimming
+the buffer afterwards happens only once the whole run's output already exists:
+
+```go
+logs := &bytes.Buffer{}
+capped := gqlcli.LimitWriter(logs, 4096)
+runner := gqlcli.NewScriptRunner(client, gqlcli.WithStdout(capped), gqlcli.WithStderr(capped))
+// ...
+if capped.Truncated() { /* note it in the trace */ }
+```
+
+### Concurrency
+
+`HTTPClient`, `InlineClient` and `ScriptRunner` are safe to share across goroutines, and each
+`RunSource` gets its own JavaScript runtime. Two caveats:
+
+- `LastResponseMetadata()` reports the most recent response across all callers, so it only
+  carries a well-defined meaning when operations are issued serially.
+- The single-goroutine guarantee for `WithOnRequest`/`WithOnResponse`/`WithApprover` is **per
+  run**. Concurrent `RunSource` calls on one runner invoke your callbacks from several
+  goroutines, so a callback accumulating shared state across runs needs its own lock.
 
 ### Inline Mode — GraphQL-Backed CLI Applications
 

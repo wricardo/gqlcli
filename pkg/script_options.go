@@ -21,7 +21,10 @@ var ErrOperationBudget = errors.New("script exceeded its GraphQL operation budge
 
 // RequestInfo describes a single GraphQL operation a script is attempting.
 type RequestInfo struct {
-	// Type is "query" or "mutation".
+	// Type is the operation kind the document actually declares —
+	// OperationQuery, OperationMutation or OperationSubscription — not the
+	// gql helper the script happened to call. It falls back to the helper's
+	// own kind only when the document cannot be parsed.
 	Type string
 	// Operation is the GraphQL document text.
 	Operation string
@@ -98,16 +101,18 @@ func WithReadOnly(readOnly bool) ScriptOption {
 // attempts, before any policy check. Operations later blocked by WithReadOnly
 // or WithApprover are reported here too; use WithOnResponse for the outcome.
 //
-// The callback runs on the single goroutine driving the JavaScript runtime, so
-// it needs no locking of its own — gql.each interleaves its workers inside that
-// one runtime rather than spreading them across goroutines.
+// Within one run the callback is invoked from a single goroutine — gql.each
+// interleaves its workers inside one JavaScript runtime rather than spreading
+// them across goroutines — so it needs no locking to observe a single run.
+// Concurrent RunSource calls on a shared runner do run in parallel, so a
+// callback accumulating state across runs must guard it.
 func WithOnRequest(fn func(RequestInfo)) ScriptOption {
 	return func(c *scriptConfig) { c.onRequest = fn }
 }
 
 // WithOnResponse registers a callback invoked after each attempted operation
-// settles, with the result or the error that blocked or failed it. Like
-// WithOnRequest, it runs on the runtime's single goroutine.
+// settles, with the result or the error that blocked or failed it. It carries
+// the same threading guarantee as WithOnRequest.
 func WithOnResponse(fn func(RequestInfo, map[string]interface{}, error)) ScriptOption {
 	return func(c *scriptConfig) { c.onResponse = fn }
 }
@@ -116,12 +121,62 @@ func WithOnResponse(fn func(RequestInfo, map[string]interface{}, error)) ScriptO
 // budget. Returning a non-nil error aborts that one operation; the script may
 // catch it and continue. Use it to prompt a human or apply a host policy.
 //
-// It runs on the runtime's single goroutine, which is also the goroutine
-// blocked inside RunSource: an approver that waits on a human holds the script
-// still while it waits.
+// It runs on the goroutine blocked inside RunSource, so an approver that waits
+// on a human holds that script still while it waits — and only that script.
 func WithApprover(fn func(context.Context, RequestInfo) error) ScriptOption {
 	return func(c *scriptConfig) { c.approver = fn }
 }
+
+// LimitedWriter passes at most a fixed number of bytes through to an
+// underlying writer and discards the rest, reporting whether anything was
+// dropped. Build one with LimitWriter.
+type LimitedWriter struct {
+	w         io.Writer
+	limit     int64
+	written   int64
+	truncated bool
+}
+
+// LimitWriter caps what a script can write through WithStdout/WithStderr.
+//
+// Capping at the writer, rather than trimming the buffer afterwards, is what
+// actually bounds memory: a script that logs inside a loop produces its whole
+// run's worth of output before anyone gets to trim it. A limit of zero or less
+// discards everything.
+//
+// It is not safe for concurrent use, which suits its purpose — script console
+// output arrives on the runtime's single goroutine.
+func LimitWriter(w io.Writer, limit int64) *LimitedWriter {
+	return &LimitedWriter{w: w, limit: limit}
+}
+
+// Write implements io.Writer. Short writes are never reported to the script:
+// it returns len(p) even when part of p was dropped, since a discarded log line
+// is not a script error.
+func (l *LimitedWriter) Write(p []byte) (int, error) {
+	room := l.limit - l.written
+	if room <= 0 {
+		l.truncated = true
+		return len(p), nil
+	}
+	chunk := p
+	if int64(len(chunk)) > room {
+		chunk = chunk[:room]
+		l.truncated = true
+	}
+	n, err := l.w.Write(chunk)
+	l.written += int64(n)
+	if err != nil {
+		return n, err
+	}
+	return len(p), nil
+}
+
+// Truncated reports whether any output was discarded.
+func (l *LimitedWriter) Truncated() bool { return l.truncated }
+
+// Written reports how many bytes reached the underlying writer.
+func (l *LimitedWriter) Written() int64 { return l.written }
 
 func copyVariables(vars map[string]interface{}) map[string]interface{} {
 	if vars == nil {

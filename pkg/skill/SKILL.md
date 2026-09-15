@@ -172,12 +172,31 @@ errors.Is(err, gqlcli.ErrScriptInterrupted) // cancelled/timed out vs. a script 
 - `RequireOperationKind(doc, kind)` / `DocumentOperationKind(doc)` apply the same check to
   documents the host dispatches itself.
 - Callbacks get a copy of `RequestInfo.Variables` — a hook cannot change what is sent — and
-  run on the runtime's single goroutine, so they need no locking.
+  within one run are called from a single goroutine, so they need no locking. Concurrent
+  `RunSource` calls on a shared runner do run in parallel.
 - `NewScriptRunner` takes `OperationExecutor` (just `Execute` + `ExecuteMutation`), so an
   in-house client needs no `Introspect`/`LastResponseMetadata` stubs.
+- `LimitWriter(w, n)` caps captured console output — bounding memory during the run, unlike
+  trimming the buffer afterwards. `Truncated()` reports whether anything was dropped.
 - `ProjectConfig.ResolveScript(name)` + `(*NamedScript).MergeInput(input)` reuse scripts
   saved in `.gqlcli.json`.
-- `*InlineExecutor` does not satisfy `Client`; only `NewHTTPClient` works today.
+
+### Running scripts in-process (no HTTP)
+
+`NewInlineClient` adapts an `InlineExecutor` to `Client`, so a gqlgen app runs the same
+scripts against its own schema with no server:
+
+```go
+client := gqlcli.NewInlineClient(gqlcli.NewInlineExecutor(schema))
+runner := gqlcli.NewScriptRunner(client, gqlcli.WithReadOnly(true))
+d := client.Describer() // schema discovery against the same in-process schema
+```
+
+`ExecutionMode` is ignored (an inline client is already one transport) and
+`LastResponseMetadata` is nil (no HTTP response).
+
+`HTTPClient`, `InlineClient` and `ScriptRunner` are all safe to share across goroutines;
+`LastResponseMetadata()` is only well-defined for serial use.
 
 ### Schema discovery from a Go program
 
