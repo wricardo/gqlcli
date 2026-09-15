@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -58,114 +59,10 @@ func extractTypeFromErrorMsg(msg string) string {
 	return extractHintTargetFromErrorMsg(msg).typeName
 }
 
-// HTTPClient is a GraphQL client that executes operations via HTTP
-type HTTPClient struct {
-	config               *Config
-	client               *resty.Client
-	describer            *Describer
-	lastResponseMetadata *ResponseMetadata
-}
-
-func (c *HTTPClient) getDescriber() *Describer {
-	if c.describer == nil {
-		c.describer = NewDescriberFromHTTPClient(c)
-	}
-	return c.describer
-}
-
-// NewHTTPClient creates a new HTTP GraphQL client
-func NewHTTPClient(cfg *Config) *HTTPClient {
-	timeout := time.Duration(cfg.Timeout) * time.Second
-	if cfg.Timeout == 0 {
-		timeout = 30 * time.Second
-	}
-
-	restClient := resty.New().SetTimeout(timeout)
-	if cfg.RetryCount > 0 {
-		retryDelay := cfg.RetryDelay
-		if retryDelay == 0 {
-			retryDelay = time.Second
-		}
-		restClient.
-			SetRetryCount(cfg.RetryCount).
-			SetRetryWaitTime(retryDelay).
-			AddRetryCondition(func(resp *resty.Response, err error) bool {
-				if err != nil {
-					return true
-				}
-				if resp == nil {
-					return false
-				}
-				status := resp.StatusCode()
-				return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= http.StatusInternalServerError
-			})
-	}
-
-	if cfg.Insecure {
-		restClient.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true})
-	}
-
-	// Enable debug mode if configured
-	if cfg.Debug {
-		restClient.SetDebug(true)
-	}
-
-	// Apply custom headers first so Token can override Authorization if needed
-	for k, v := range cfg.Headers {
-		restClient.SetHeader(k, v)
-	}
-
-	// Add auth if configured
-	if cfg.Token != "" {
-		restClient.SetHeader("Authorization", fmt.Sprintf("Bearer %s", cfg.Token))
-	}
-
-	return &HTTPClient{
-		config: cfg,
-		client: restClient,
-	}
-}
-
-// LastResponseMetadata returns metadata from the most recent HTTP response.
-func (c *HTTPClient) LastResponseMetadata() *ResponseMetadata {
-	if c.lastResponseMetadata == nil {
-		return nil
-	}
-	meta := *c.lastResponseMetadata
-	meta.Headers = c.lastResponseMetadata.Headers.Clone()
-	return &meta
-}
-
-// Execute runs a GraphQL query via HTTP
-func (c *HTTPClient) Execute(ctx context.Context, mode ExecutionMode, opts QueryOptions) (map[string]interface{}, error) {
-	if mode != ExecutionModeHTTP {
-		return nil, fmt.Errorf("HTTP client only supports ExecutionModeHTTP")
-	}
-
-	return c.executeOperation(ctx, opts.Query, opts.Variables, opts.OperationName)
-}
-
-// ExecuteMutation runs a GraphQL mutation via HTTP
-func (c *HTTPClient) ExecuteMutation(ctx context.Context, mode ExecutionMode, opts MutationOptions) (map[string]interface{}, error) {
-	if mode != ExecutionModeHTTP {
-		return nil, fmt.Errorf("HTTP client only supports ExecutionModeHTTP")
-	}
-
-	// Auto-wrap input if provided
-	variables := opts.Variables
-	if opts.Input != nil {
-		if variables == nil {
-			variables = make(map[string]interface{})
-		}
-		variables["input"] = opts.Input
-	}
-
-	return c.executeOperation(ctx, opts.Mutation, variables, opts.OperationName)
-}
-
-// Introspect queries the GraphQL schema
-func (c *HTTPClient) Introspect(ctx context.Context) (map[string]interface{}, error) {
-	query := `
+// FullIntrospectionQuery is the schema introspection document the clients use.
+// Exported so an embedder issuing introspection through its own transport asks
+// for the same shape the formatters expect.
+const FullIntrospectionQuery = `
 		query IntrospectionQuery {
 			__schema {
 				queryType { name }
@@ -235,12 +132,137 @@ func (c *HTTPClient) Introspect(ctx context.Context) (map[string]interface{}, er
 		}
 	`
 
-	return c.executeOperation(ctx, query, nil, "")
+// HTTPClient is a GraphQL client that executes operations via HTTP.
+//
+// It is safe to use from several goroutines. Note that LastResponseMetadata
+// reports the most recent response across all of them, so it only carries a
+// well-defined meaning when operations are issued serially.
+type HTTPClient struct {
+	config    *Config
+	client    *resty.Client
+	describer *Describer
+
+	describerOnce sync.Once
+
+	metadataMu           sync.Mutex
+	lastResponseMetadata *ResponseMetadata
+}
+
+func (c *HTTPClient) setLastResponseMetadata(meta *ResponseMetadata) {
+	c.metadataMu.Lock()
+	defer c.metadataMu.Unlock()
+	c.lastResponseMetadata = meta
+}
+
+func (c *HTTPClient) getDescriber() *Describer {
+	c.describerOnce.Do(func() {
+		if c.describer == nil {
+			c.describer = NewDescriberFromHTTPClient(c)
+		}
+	})
+	return c.describer
+}
+
+// NewHTTPClient creates a new HTTP GraphQL client
+func NewHTTPClient(cfg *Config) *HTTPClient {
+	timeout := time.Duration(cfg.Timeout) * time.Second
+	if cfg.Timeout == 0 {
+		timeout = 30 * time.Second
+	}
+
+	restClient := resty.New().SetTimeout(timeout)
+	if cfg.RetryCount > 0 {
+		retryDelay := cfg.RetryDelay
+		if retryDelay == 0 {
+			retryDelay = time.Second
+		}
+		restClient.
+			SetRetryCount(cfg.RetryCount).
+			SetRetryWaitTime(retryDelay).
+			AddRetryCondition(func(resp *resty.Response, err error) bool {
+				if err != nil {
+					return true
+				}
+				if resp == nil {
+					return false
+				}
+				status := resp.StatusCode()
+				return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= http.StatusInternalServerError
+			})
+	}
+
+	if cfg.Insecure {
+		restClient.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true})
+	}
+
+	// Enable debug mode if configured
+	if cfg.Debug {
+		restClient.SetDebug(true)
+	}
+
+	// Apply custom headers first so Token can override Authorization if needed
+	for k, v := range cfg.Headers {
+		restClient.SetHeader(k, v)
+	}
+
+	// Add auth if configured
+	if cfg.Token != "" {
+		restClient.SetHeader("Authorization", fmt.Sprintf("Bearer %s", cfg.Token))
+	}
+
+	return &HTTPClient{
+		config: cfg,
+		client: restClient,
+	}
+}
+
+// LastResponseMetadata returns metadata from the most recent HTTP response.
+func (c *HTTPClient) LastResponseMetadata() *ResponseMetadata {
+	c.metadataMu.Lock()
+	defer c.metadataMu.Unlock()
+	if c.lastResponseMetadata == nil {
+		return nil
+	}
+	meta := *c.lastResponseMetadata
+	meta.Headers = c.lastResponseMetadata.Headers.Clone()
+	return &meta
+}
+
+// Execute runs a GraphQL query via HTTP
+func (c *HTTPClient) Execute(ctx context.Context, mode ExecutionMode, opts QueryOptions) (map[string]interface{}, error) {
+	if mode != ExecutionModeHTTP {
+		return nil, fmt.Errorf("HTTP client only supports ExecutionModeHTTP")
+	}
+
+	return c.executeOperation(ctx, opts.Query, opts.Variables, opts.OperationName)
+}
+
+// ExecuteMutation runs a GraphQL mutation via HTTP
+func (c *HTTPClient) ExecuteMutation(ctx context.Context, mode ExecutionMode, opts MutationOptions) (map[string]interface{}, error) {
+	if mode != ExecutionModeHTTP {
+		return nil, fmt.Errorf("HTTP client only supports ExecutionModeHTTP")
+	}
+
+	// Auto-wrap input if provided
+	variables := opts.Variables
+	if opts.Input != nil {
+		if variables == nil {
+			variables = make(map[string]interface{})
+		}
+		variables["input"] = opts.Input
+	}
+
+	return c.executeOperation(ctx, opts.Mutation, variables, opts.OperationName)
+}
+
+// Introspect queries the GraphQL schema
+func (c *HTTPClient) Introspect(ctx context.Context) (map[string]interface{}, error) {
+	return c.executeOperation(ctx, FullIntrospectionQuery, nil, "")
 }
 
 // executeOperation is the internal method that handles request/response
 func (c *HTTPClient) executeOperation(ctx context.Context, query string, variables map[string]interface{}, operationName string) (map[string]interface{}, error) {
-	c.lastResponseMetadata = nil
+	c.setLastResponseMetadata(nil)
 
 	// Validate URL
 	if c.config.URL == "" {
@@ -272,7 +294,7 @@ func (c *HTTPClient) executeOperation(ctx context.Context, query string, variabl
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	c.lastResponseMetadata = responseMetadataFromResty(resp)
+	c.setLastResponseMetadata(responseMetadataFromResty(resp))
 
 	// Parse response
 	var result map[string]interface{}
