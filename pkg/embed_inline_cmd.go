@@ -42,7 +42,9 @@ func (cs *InlineCommandSet) embedIndexCommand() *cli.Command {
 		&cli.BoolFlag{Name: "args", Usage: "Include field argument signatures in the indexed SDL (default true)", Value: true},
 		&cli.IntFlag{Name: "concurrency", Usage: "Parallel embedding requests", Value: 4},
 		&cli.IntFlag{Name: "max-chars", Usage: "Truncate each type's text to this many characters", Value: DefaultEmbeddingMaxChars},
-		&cli.BoolFlag{Name: "force", Usage: "Re-embed every type instead of reusing unchanged vectors"},
+		&cli.BoolFlag{Name: "no-queries", Usage: "Skip the Query root's fields"},
+		&cli.BoolFlag{Name: "no-mutations", Usage: "Skip the Mutation root's fields"},
+		&cli.BoolFlag{Name: "force", Usage: "Re-embed every entry instead of reusing unchanged vectors"},
 		&cli.BoolFlag{Name: "quiet", Aliases: []string{"q"}, Usage: "Suppress per-type progress output"},
 	}
 	flags = append(flags, embedderFlags()...)
@@ -76,14 +78,16 @@ func (cs *InlineCommandSet) embedIndexCommand() *cli.Command {
 			reused := 0
 			showProgress := !c.Bool("quiet") && stderrIsTerminal()
 			opts := EmbeddingIndexOptions{
-				Kinds:       c.StringSlice("kind"),
-				Include:     c.StringSlice("include"),
-				Exclude:     c.StringSlice("exclude"),
-				ShowArgs:    c.Bool("args"),
-				MaxChars:    c.Int("max-chars"),
-				Concurrency: c.Int("concurrency"),
-				Previous:    previous,
-				Force:       c.Bool("force"),
+				Kinds:         c.StringSlice("kind"),
+				Include:       c.StringSlice("include"),
+				Exclude:       c.StringSlice("exclude"),
+				ShowArgs:      c.Bool("args"),
+				MaxChars:      c.Int("max-chars"),
+				Concurrency:   c.Int("concurrency"),
+				Previous:      previous,
+				Force:         c.Bool("force"),
+				SkipQueries:   c.Bool("no-queries"),
+				SkipMutations: c.Bool("no-mutations"),
 				Progress: func(done, total int, name string, wasReused bool) {
 					if wasReused {
 						reused++
@@ -105,8 +109,8 @@ func (cs *InlineCommandSet) embedIndexCommand() *cli.Command {
 				return err
 			}
 
-			fmt.Fprintf(os.Stderr, "wrote %s: %d types, %d dims, model %s (%d reused)\n",
-				outPath, len(ix.Types), ix.Dim, ix.Model, reused)
+			fmt.Fprintf(os.Stderr, "wrote %s: %d queries, %d mutations, %d types, %d dims, model %s (%d reused)\n",
+				outPath, len(ix.Queries), len(ix.Mutations), len(ix.Types), ix.Dim, ix.Model, reused)
 			return nil
 		},
 	}
@@ -121,7 +125,8 @@ func (cs *InlineCommandSet) embedSearchCommand() *cli.Command {
 			Value:   EmbeddingIndexPath(""),
 		},
 		&cli.IntFlag{Name: "top", Aliases: []string{"n"}, Usage: "Number of matches to return", Value: 5},
-		&cli.StringSliceFlag{Name: "kind", Aliases: []string{"k"}, Usage: "Only return these type kinds (repeatable)"},
+		&cli.StringSliceFlag{Name: "category", Aliases: []string{"c"}, Usage: "Categories to return: queries, mutations, types, operations, all (repeatable; default: all)"},
+		&cli.StringSliceFlag{Name: "kind", Aliases: []string{"k"}, Usage: "Only return these type kinds (repeatable; applies to the types category)"},
 		&cli.Float64Flag{Name: "min-score", Usage: "Drop matches below this cosine similarity"},
 		&cli.BoolFlag{Name: "no-sdl", Usage: "Print only names, kinds and scores"},
 		&cli.StringFlag{Name: "format", Aliases: []string{"f"}, Usage: "Output format: llm (default), json, table, compact, toon", Value: "llm"},
@@ -130,7 +135,7 @@ func (cs *InlineCommandSet) embedSearchCommand() *cli.Command {
 
 	return &cli.Command{
 		Name:      "search",
-		Usage:     "Find the types closest to a description",
+		Usage:     "Find the queries, mutations and types closest to a description",
 		ArgsUsage: "<text>",
 		Flags:     flags,
 		Action: func(c *cli.Context) error {
@@ -153,17 +158,21 @@ func (cs *InlineCommandSet) embedSearchCommand() *cli.Command {
 			}
 			ix.SetEmbedder(embedder)
 
-			fetch := c.Int("top")
+			top := c.Int("top")
+			fetch := top
 			if len(c.StringSlice("kind")) > 0 || c.IsSet("min-score") {
-				fetch = len(ix.Types)
+				fetch = len(ix.Types) + len(ix.Queries) + len(ix.Mutations)
 			}
-			matches, err := ix.Search(context.Background(), query, fetch)
+			results, err := ix.Search(context.Background(), query, fetch)
 			if err != nil {
 				return err
 			}
-			matches = filterMatches(matches, c.StringSlice("kind"), c.Float64("min-score"), c.Int("top"))
+			results, err = filterResults(results, c, top)
+			if err != nil {
+				return err
+			}
 
-			return outputMatches(NewFormatterRegistry(), c, matches)
+			return outputMatches(NewFormatterRegistry(), c, results)
 		},
 	}
 }

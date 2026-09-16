@@ -131,8 +131,16 @@ func (b *CLIBuilder) embedIndexCommand() *cli.Command {
 			Value: DefaultEmbeddingMaxChars,
 		},
 		&cli.BoolFlag{
+			Name:  "no-queries",
+			Usage: "Skip the Query root's fields (index types and mutations only)",
+		},
+		&cli.BoolFlag{
+			Name:  "no-mutations",
+			Usage: "Skip the Mutation root's fields (index types and queries only)",
+		},
+		&cli.BoolFlag{
 			Name:  "force",
-			Usage: "Re-embed every type instead of reusing unchanged vectors from the existing index",
+			Usage: "Re-embed every entry instead of reusing unchanged vectors from the existing index",
 		},
 		&cli.BoolFlag{
 			Name:    "quiet",
@@ -189,16 +197,18 @@ func (b *CLIBuilder) embedIndexCommand() *cli.Command {
 			}
 
 			opts := EmbeddingIndexOptions{
-				Kinds:       c.StringSlice("kind"),
-				Include:     c.StringSlice("include"),
-				Exclude:     c.StringSlice("exclude"),
-				ShowArgs:    c.Bool("args"),
-				MaxChars:    c.Int("max-chars"),
-				Concurrency: c.Int("concurrency"),
-				Previous:    previous,
-				Force:       c.Bool("force"),
-				Env:         b.effectiveEnvName(c),
-				Endpoint:    b.config.URL,
+				Kinds:         c.StringSlice("kind"),
+				Include:       c.StringSlice("include"),
+				Exclude:       c.StringSlice("exclude"),
+				ShowArgs:      c.Bool("args"),
+				MaxChars:      c.Int("max-chars"),
+				Concurrency:   c.Int("concurrency"),
+				Previous:      previous,
+				Force:         c.Bool("force"),
+				SkipQueries:   c.Bool("no-queries"),
+				SkipMutations: c.Bool("no-mutations"),
+				Env:           b.effectiveEnvName(c),
+				Endpoint:      b.config.URL,
 			}
 
 			reused := 0
@@ -230,8 +240,8 @@ func (b *CLIBuilder) embedIndexCommand() *cli.Command {
 				return err
 			}
 
-			fmt.Fprintf(os.Stderr, "wrote %s: %d types, %d dims, model %s (%d reused)\n",
-				outPath, len(ix.Types), ix.Dim, ix.Model, reused)
+			fmt.Fprintf(os.Stderr, "wrote %s: %d queries, %d mutations, %d types, %d dims, model %s (%d reused)\n",
+				outPath, len(ix.Queries), len(ix.Mutations), len(ix.Types), ix.Dim, ix.Model, reused)
 			return nil
 		},
 	}
@@ -255,9 +265,14 @@ func (b *CLIBuilder) embedSearchCommand() *cli.Command {
 			Value:   5,
 		},
 		&cli.StringSliceFlag{
+			Name:    "category",
+			Aliases: []string{"c"},
+			Usage:   "Categories to return: queries, mutations, types, operations, all (repeatable; default: all)",
+		},
+		&cli.StringSliceFlag{
 			Name:    "kind",
 			Aliases: []string{"k"},
-			Usage:   "Only return these type kinds (repeatable)",
+			Usage:   "Only return these type kinds (repeatable; applies to the types category)",
 		},
 		&cli.Float64Flag{
 			Name:  "min-score",
@@ -278,14 +293,18 @@ func (b *CLIBuilder) embedSearchCommand() *cli.Command {
 
 	return &cli.Command{
 		Name:      "search",
-		Usage:     "Find the types closest to a description",
+		Usage:     "Find the queries, mutations and types closest to a description",
 		ArgsUsage: "<text>",
-		Description: "Embed the given text and return the closest types from the index.\n\n" +
-			"Requires an index built by 'gqlcli embed index'. Only the query is embedded,\n" +
-			"so no introspection call is made and the endpoint is not contacted.\n\n" +
+		Description: "Embed the given text and return the closest matches from the index, grouped\n" +
+			"into three categories: queries and mutations (the schema's entry points) and\n" +
+			"types. --top applies per category, so the default returns 5 of each.\n\n" +
+			"Requires an index built by 'gqlcli embed index'. Only the query text is embedded,\n" +
+			"so no introspection call is made and the GraphQL endpoint is not contacted.\n\n" +
 			"Examples:\n" +
 			"  gqlcli embed search 'sms provider credentials'\n" +
-			"  gqlcli embed search --top 10 --kind INPUT_OBJECT 'create a campaign'\n" +
+			"  gqlcli embed search --category mutations 'create a campaign'\n" +
+			"  gqlcli embed search --category operations --top 10 --no-sdl 'pause a conversation'\n" +
+			"  gqlcli embed search --category types --kind INPUT_OBJECT 'campaign settings'\n" +
 			"  gqlcli embed search --format json --no-sdl 'user email address'",
 		Flags: flags,
 		Action: func(c *cli.Context) error {
@@ -310,24 +329,91 @@ func (b *CLIBuilder) embedSearchCommand() *cli.Command {
 			}
 			ix.SetEmbedder(embedder)
 
-			// Over-fetch so kind and score filters still return --top results.
-			fetch := c.Int("top")
+			// Over-fetch so the kind and score filters still return --top results.
+			top := c.Int("top")
+			fetch := top
 			if len(c.StringSlice("kind")) > 0 || c.IsSet("min-score") {
-				fetch = len(ix.Types)
+				fetch = len(ix.Types) + len(ix.Queries) + len(ix.Mutations)
 			}
 
-			matches, err := ix.Search(context.Background(), query, fetch)
+			results, err := ix.Search(context.Background(), query, fetch)
 			if err != nil {
 				return err
 			}
-			matches = filterMatches(matches, c.StringSlice("kind"), c.Float64("min-score"), c.Int("top"))
+			results, err = filterResults(results, c, top)
+			if err != nil {
+				return err
+			}
 
-			return outputMatches(b.formatReg, c, matches)
+			return outputMatches(b.formatReg, c, results)
 		},
 	}
 }
 
-func filterMatches(matches []TypeMatch, kinds []string, minScore float64, top int) []TypeMatch {
+// searchCategories returns the categories to show, honoring --category.
+// Unknown names are rejected rather than silently ignored.
+func searchCategories(c *cli.Context) (showQueries, showMutations, showTypes bool, err error) {
+	selected := c.StringSlice("category")
+	if len(selected) == 0 {
+		return true, true, true, nil
+	}
+	for _, name := range selected {
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "query", "queries":
+			showQueries = true
+		case "mutation", "mutations":
+			showMutations = true
+		case "type", "types":
+			showTypes = true
+		case "operations", "ops":
+			showQueries, showMutations = true, true
+		case "all":
+			return true, true, true, nil
+		default:
+			return false, false, false, fmt.Errorf("unknown category %q: use queries, mutations, types, operations, or all", name)
+		}
+	}
+	return showQueries, showMutations, showTypes, nil
+}
+
+// filterResults applies the kind, score and category filters, then trims each
+// category back to top. Ranking already happened; this only removes.
+func filterResults(results *SearchResults, c *cli.Context, top int) (*SearchResults, error) {
+	showQueries, showMutations, showTypes, err := searchCategories(c)
+	if err != nil {
+		return nil, err
+	}
+
+	minScore := c.Float64("min-score")
+	out := &SearchResults{}
+
+	if showQueries {
+		out.Queries = trimOperations(results.Queries, minScore, top)
+	}
+	if showMutations {
+		out.Mutations = trimOperations(results.Mutations, minScore, top)
+	}
+	if showTypes {
+		out.Types = filterTypeMatches(results.Types, c.StringSlice("kind"), minScore, top)
+	}
+	return out, nil
+}
+
+func trimOperations(matches []OperationMatch, minScore float64, top int) []OperationMatch {
+	filtered := make([]OperationMatch, 0, len(matches))
+	for _, m := range matches {
+		if m.Score < minScore {
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+	if top > 0 && len(filtered) > top {
+		filtered = filtered[:top]
+	}
+	return filtered
+}
+
+func filterTypeMatches(matches []TypeMatch, kinds []string, minScore float64, top int) []TypeMatch {
 	kindSet := map[string]bool{}
 	for _, k := range kinds {
 		if k != "" {
@@ -351,15 +437,63 @@ func filterMatches(matches []TypeMatch, kinds []string, minScore float64, top in
 	return filtered
 }
 
-func outputMatches(reg FormatterRegistry, c *cli.Context, matches []TypeMatch) error {
+func outputMatches(reg FormatterRegistry, c *cli.Context, results *SearchResults) error {
 	noSDL := c.Bool("no-sdl")
 
 	if c.String("format") == "llm" {
-		if len(matches) == 0 {
-			fmt.Println("No matching types.")
-			return nil
+		return printResultsLLM(results, noSDL)
+	}
+
+	payload := map[string]interface{}{}
+	if len(results.Queries) > 0 || c.IsSet("category") {
+		payload["queries"] = operationRows(results.Queries, noSDL)
+	}
+	if len(results.Mutations) > 0 || c.IsSet("category") {
+		payload["mutations"] = operationRows(results.Mutations, noSDL)
+	}
+	payload["types"] = typeRows(results.Types, noSDL)
+
+	formatter, err := reg.Get(c.String("format"))
+	if err != nil {
+		return err
+	}
+	output, err := formatter.Format(payload)
+	if err != nil {
+		return err
+	}
+	fmt.Println(output)
+	return nil
+}
+
+func printResultsLLM(results *SearchResults, noSDL bool) error {
+	if len(results.Queries) == 0 && len(results.Mutations) == 0 && len(results.Types) == 0 {
+		fmt.Println("No matches.")
+		return nil
+	}
+
+	printOps := func(heading string, ops []OperationMatch) {
+		if len(ops) == 0 {
+			return
 		}
-		for _, m := range matches {
+		fmt.Printf("# %s\n\n", heading)
+		for _, m := range ops {
+			fmt.Printf("## %s: %s — score %.4f\n", m.Name, m.ReturnType, m.Score)
+			if m.Description != "" {
+				fmt.Printf("%s\n", m.Description)
+			}
+			if !noSDL && m.SDL != "" {
+				fmt.Printf("\n```graphql\n%s\n```\n", m.SDL)
+			}
+			fmt.Println()
+		}
+	}
+
+	printOps("Queries", results.Queries)
+	printOps("Mutations", results.Mutations)
+
+	if len(results.Types) > 0 {
+		fmt.Printf("# Types\n\n")
+		for _, m := range results.Types {
 			fmt.Printf("## %s (%s) — score %.4f\n", m.Name, m.Kind, m.Score)
 			if m.Description != "" {
 				fmt.Printf("%s\n", m.Description)
@@ -369,9 +503,30 @@ func outputMatches(reg FormatterRegistry, c *cli.Context, matches []TypeMatch) e
 			}
 			fmt.Println()
 		}
-		return nil
 	}
+	return nil
+}
 
+func operationRows(matches []OperationMatch, noSDL bool) []interface{} {
+	rows := make([]interface{}, 0, len(matches))
+	for _, m := range matches {
+		row := map[string]interface{}{
+			"name":        m.Name,
+			"return_type": m.ReturnType,
+			"score":       m.Score,
+		}
+		if m.Description != "" {
+			row["description"] = m.Description
+		}
+		if !noSDL {
+			row["sdl"] = m.SDL
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func typeRows(matches []TypeMatch, noSDL bool) []interface{} {
 	rows := make([]interface{}, 0, len(matches))
 	for _, m := range matches {
 		row := map[string]interface{}{
@@ -387,15 +542,5 @@ func outputMatches(reg FormatterRegistry, c *cli.Context, matches []TypeMatch) e
 		}
 		rows = append(rows, row)
 	}
-
-	formatter, err := reg.Get(c.String("format"))
-	if err != nil {
-		return err
-	}
-	output, err := formatter.Format(map[string]interface{}{"matches": rows})
-	if err != nil {
-		return err
-	}
-	fmt.Println(output)
-	return nil
+	return rows
 }

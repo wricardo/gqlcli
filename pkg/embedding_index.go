@@ -20,6 +20,27 @@ import (
 // rejects files from a future version rather than misreading them.
 const EmbeddingIndexVersion = 1
 
+// operation buckets, used internally while building an index to keep query
+// fields, mutation fields and types in separate reuse/caching namespaces.
+type opBucket int
+
+const (
+	bucketType opBucket = iota
+	bucketQuery
+	bucketMutation
+)
+
+func (b opBucket) label() string {
+	switch b {
+	case bucketQuery:
+		return "query"
+	case bucketMutation:
+		return "mutation"
+	default:
+		return "type"
+	}
+}
+
 // TypeEmbedding is one GraphQL type in an embedding index: its SDL, the hash of
 // the text that was embedded, and the vector.
 type TypeEmbedding struct {
@@ -34,27 +55,48 @@ type TypeEmbedding struct {
 	Embedding []float32 `json:"embedding"`
 }
 
-// EmbeddingIndex is a searchable set of GraphQL type embeddings, persisted as
-// JSON. Build one with BuildEmbeddingIndex, load one with LoadEmbeddingIndex.
+// OperationEmbedding is one field of the Query or Mutation root type: its call
+// signature, the hash of the text that was embedded, and the vector.
+type OperationEmbedding struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// ReturnType is the field's GraphQL return type, e.g. "[User!]!".
+	ReturnType string `json:"return_type"`
+	// SDL is the field's call signature, e.g. "createUser(input: CreateUserInput!): User!".
+	SDL       string    `json:"sdl"`
+	TextHash  string    `json:"text_hash"`
+	Embedding []float32 `json:"embedding"`
+}
+
+// EmbeddingIndex is a searchable set of GraphQL embeddings, persisted as JSON.
+// Entries are grouped into three categories: Queries and Mutations (fields of
+// the respective root types — the schema's entry points) and Types (every
+// other GraphQL type). Build one with BuildEmbeddingIndex, load one with
+// LoadEmbeddingIndex.
 type EmbeddingIndex struct {
 	Version int    `json:"version"`
 	Env     string `json:"env,omitempty"`
-	// Endpoint is the GraphQL URL the types were introspected from.
+	// Endpoint is the GraphQL URL the schema was introspected from.
 	Endpoint string `json:"endpoint,omitempty"`
 	// EmbeddingEndpoint and Model identify the vector space. Comparing a query
 	// embedded by a different model against these vectors is meaningless, so
 	// Search refuses it.
-	EmbeddingEndpoint string          `json:"embedding_endpoint,omitempty"`
-	Model             string          `json:"model"`
-	Dim               int             `json:"dim"`
-	CreatedAt         time.Time       `json:"created_at"`
-	Types             []TypeEmbedding `json:"types"`
+	EmbeddingEndpoint string    `json:"embedding_endpoint,omitempty"`
+	Model             string    `json:"model"`
+	Dim               int       `json:"dim"`
+	CreatedAt         time.Time `json:"created_at"`
+	// Queries and Mutations hold the root-level entry points, kept separate
+	// from Types because "find me the operation for X" and "find me the type
+	// for X" are different questions with different candidate pools.
+	Queries   []OperationEmbedding `json:"queries,omitempty"`
+	Mutations []OperationEmbedding `json:"mutations,omitempty"`
+	Types     []TypeEmbedding      `json:"types"`
 
 	embedder Embedder
 }
 
-// TypeMatch is one search hit. Score is cosine similarity in [-1, 1]; higher is
-// closer.
+// TypeMatch is one type search hit. Score is cosine similarity in [-1, 1];
+// higher is closer.
 type TypeMatch struct {
 	Name        string  `json:"name"`
 	Kind        string  `json:"kind"`
@@ -63,66 +105,183 @@ type TypeMatch struct {
 	Score       float64 `json:"score"`
 }
 
+// OperationMatch is one query/mutation field search hit.
+type OperationMatch struct {
+	Name        string  `json:"name"`
+	ReturnType  string  `json:"return_type"`
+	Description string  `json:"description,omitempty"`
+	SDL         string  `json:"sdl"`
+	Score       float64 `json:"score"`
+}
+
+// SearchResults groups a search's hits by category, each independently ranked
+// and truncated to the requested topN.
+type SearchResults struct {
+	Queries   []OperationMatch `json:"queries,omitempty"`
+	Mutations []OperationMatch `json:"mutations,omitempty"`
+	Types     []TypeMatch      `json:"types,omitempty"`
+}
+
 // EmbeddingIndexOptions controls BuildEmbeddingIndex.
 type EmbeddingIndexOptions struct {
-	// Kinds restricts indexing to these type kinds (OBJECT, INPUT_OBJECT,
-	// ENUM, INTERFACE, UNION, SCALAR). Empty indexes every kind.
+	// Kinds restricts the Types category to these type kinds (OBJECT,
+	// INPUT_OBJECT, ENUM, INTERFACE, UNION, SCALAR). Empty indexes every kind.
+	// Does not affect the Queries/Mutations categories.
 	Kinds []string
-	// Include keeps only type names matching one of these globs, when non-empty.
+	// Include keeps only names (of types, query fields, and mutation fields)
+	// matching one of these globs, when non-empty.
 	Include []string
-	// Exclude drops type names matching any of these globs. Applied after Include.
+	// Exclude drops names matching any of these globs. Applied after Include.
 	Exclude []string
-	// ShowArgs includes field argument signatures in the indexed SDL. Worth
-	// leaving on: arguments carry most of the meaning of the Query root.
+	// ShowArgs includes field argument signatures in an indexed type's SDL.
+	// Query and mutation field signatures always include their arguments,
+	// regardless of this setting — arguments are the call signature.
 	ShowArgs bool
+	// SkipQueries excludes the Query root's fields from the index.
+	SkipQueries bool
+	// SkipMutations excludes the Mutation root's fields from the index.
+	SkipMutations bool
 	// MaxChars truncates the embedded text. Zero uses DefaultEmbeddingMaxChars.
 	MaxChars int
 	// Concurrency is the number of in-flight embedding requests. Zero uses 4.
 	Concurrency int
-	// Previous is an existing index whose vectors are reused for types whose
+	// Previous is an existing index whose vectors are reused for entries whose
 	// text hash is unchanged, so a rebuild only pays for what moved.
 	Previous *EmbeddingIndex
-	// Force re-embeds every type even when Previous has a matching hash.
+	// Force re-embeds every entry even when Previous has a matching hash.
 	Force bool
 	// Env and Endpoint are recorded in the index for mismatch warnings.
 	Env      string
 	Endpoint string
-	// Progress, when set, is called as each type completes. Calls are
+	// Progress, when set, is called as each entry completes. Calls are
 	// serialized, so it needs no locking of its own.
 	Progress func(done, total int, name string, reused bool)
 }
 
-// BuildEmbeddingIndex embeds the types in a GraphQL introspection response.
-// introspection is the full envelope returned by Client.Introspect (the map
-// with a "data" key).
+// buildEntry is the unit of work for the embedding worker pool: one type or
+// one query/mutation field, tagged with which category it belongs to.
+type buildEntry struct {
+	bucket      opBucket
+	name        string
+	returnKey   string // GraphQL kind for a type, return type for an operation field
+	description string
+	sdl         string
+	textHash    string
+	embedText   string
+	embedding   []float32
+}
+
+func (e buildEntry) reuseKey() string {
+	return fmt.Sprintf("%d\x00%s\x00%s", e.bucket, e.name, e.textHash)
+}
+
+// BuildEmbeddingIndex embeds the types and root-level operations in a GraphQL
+// introspection response. introspection is the full envelope returned by
+// Client.Introspect (the map with a "data" key).
 func BuildEmbeddingIndex(ctx context.Context, introspection map[string]interface{}, e Embedder, opts EmbeddingIndexOptions) (*EmbeddingIndex, error) {
 	if e == nil {
 		return nil, fmt.Errorf("embedding index: embedder is nil")
 	}
 
-	typesList, err := introspectionTypes(introspection)
+	typesList, queryType, mutationType, err := introspectionSchema(introspection)
 	if err != nil {
 		return nil, err
 	}
 
-	entries, err := selectIndexTypes(typesList, opts)
+	var entries []buildEntry
+	typeEntries, err := selectIndexTypes(typesList, opts)
 	if err != nil {
 		return nil, err
 	}
+	entries = append(entries, typeEntries...)
+
+	if !opts.SkipQueries && queryType != "" {
+		queryEntries, err := selectOperationFields(typesList, queryType, bucketQuery, opts)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, queryEntries...)
+	}
+	if !opts.SkipMutations && mutationType != "" {
+		mutationEntries, err := selectOperationFields(typesList, mutationType, bucketMutation, opts)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, mutationEntries...)
+	}
+
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("embedding index: no types matched the filters")
+		return nil, fmt.Errorf("embedding index: no types or operations matched the filters")
 	}
 
-	reusable := map[string]TypeEmbedding{}
-	if opts.Previous != nil && !opts.Force {
+	reusable := map[string]buildEntry{}
+	if opts.Previous != nil && !opts.Force && opts.Previous.Model == e.Model() {
 		for _, prev := range opts.Previous.Types {
-			if opts.Previous.Model == e.Model() {
-				reusable[prev.Name+"\x00"+prev.TextHash] = prev
-			}
+			key := buildEntry{bucket: bucketType, name: prev.Name, textHash: prev.TextHash}.reuseKey()
+			reusable[key] = buildEntry{embedding: prev.Embedding}
+		}
+		for _, prev := range opts.Previous.Queries {
+			key := buildEntry{bucket: bucketQuery, name: prev.Name, textHash: prev.TextHash}.reuseKey()
+			reusable[key] = buildEntry{embedding: prev.Embedding}
+		}
+		for _, prev := range opts.Previous.Mutations {
+			key := buildEntry{bucket: bucketMutation, name: prev.Name, textHash: prev.TextHash}.reuseKey()
+			reusable[key] = buildEntry{embedding: prev.Embedding}
 		}
 	}
 
-	concurrency := opts.Concurrency
+	if err := embedEntries(ctx, entries, e, reusable, opts.Concurrency, opts.Progress); err != nil {
+		return nil, err
+	}
+
+	ix := &EmbeddingIndex{
+		Version:   EmbeddingIndexVersion,
+		Env:       opts.Env,
+		Endpoint:  opts.Endpoint,
+		Model:     e.Model(),
+		CreatedAt: time.Now().UTC(),
+		embedder:  e,
+	}
+	if ve, ok := e.(*VenuEmbedder); ok {
+		ix.EmbeddingEndpoint = ve.Endpoint()
+	}
+
+	for _, entry := range entries {
+		switch entry.bucket {
+		case bucketQuery:
+			ix.Queries = append(ix.Queries, OperationEmbedding{
+				Name: entry.name, Description: entry.description, ReturnType: entry.returnKey,
+				SDL: entry.sdl, TextHash: entry.textHash, Embedding: entry.embedding,
+			})
+		case bucketMutation:
+			ix.Mutations = append(ix.Mutations, OperationEmbedding{
+				Name: entry.name, Description: entry.description, ReturnType: entry.returnKey,
+				SDL: entry.sdl, TextHash: entry.textHash, Embedding: entry.embedding,
+			})
+		default:
+			ix.Types = append(ix.Types, TypeEmbedding{
+				Name: entry.name, Kind: entry.returnKey, Description: entry.description,
+				SDL: entry.sdl, TextHash: entry.textHash, Embedding: entry.embedding,
+			})
+		}
+	}
+	sort.Slice(ix.Types, func(i, j int) bool { return ix.Types[i].Name < ix.Types[j].Name })
+	sort.Slice(ix.Queries, func(i, j int) bool { return ix.Queries[i].Name < ix.Queries[j].Name })
+	sort.Slice(ix.Mutations, func(i, j int) bool { return ix.Mutations[i].Name < ix.Mutations[j].Name })
+
+	for _, entry := range entries {
+		if len(entry.embedding) > 0 {
+			ix.Dim = len(entry.embedding)
+			break
+		}
+	}
+	ix.normalize()
+	return ix, nil
+}
+
+// embedEntries fills in entries[i].embedding, reusing cached vectors where
+// available and calling e.Embed concurrently otherwise.
+func embedEntries(ctx context.Context, entries []buildEntry, e Embedder, reusable map[string]buildEntry, concurrency int, progress func(done, total int, name string, reused bool)) error {
 	if concurrency <= 0 {
 		concurrency = 4
 	}
@@ -152,26 +311,26 @@ func BuildEmbeddingIndex(ctx context.Context, introspection map[string]interface
 
 			entry := &entries[i]
 			reused := false
-			if prev, ok := reusable[entry.Name+"\x00"+entry.TextHash]; ok && len(prev.Embedding) > 0 {
-				entry.Embedding = prev.Embedding
+			if prev, ok := reusable[entry.reuseKey()]; ok && len(prev.embedding) > 0 {
+				entry.embedding = prev.embedding
 				reused = true
 			} else {
 				vec, err := e.Embed(ctx, entry.embedText)
 				if err != nil {
 					mu.Lock()
 					if firstErr == nil {
-						firstErr = fmt.Errorf("embedding type %s: %w", entry.Name, err)
+						firstErr = fmt.Errorf("embedding %s %s: %w", entry.bucket.label(), entry.name, err)
 					}
 					mu.Unlock()
 					return
 				}
-				entry.Embedding = vec
+				entry.embedding = vec
 			}
 
 			mu.Lock()
 			done++
-			if opts.Progress != nil {
-				opts.Progress(done, len(entries), entry.Name, reused)
+			if progress != nil {
+				progress(done, len(entries), entry.name, reused)
 			}
 			mu.Unlock()
 		}
@@ -182,34 +341,7 @@ func BuildEmbeddingIndex(ctx context.Context, introspection map[string]interface
 		go worker()
 	}
 	wg.Wait()
-
-	if firstErr != nil {
-		return nil, firstErr
-	}
-
-	ix := &EmbeddingIndex{
-		Version:   EmbeddingIndexVersion,
-		Env:       opts.Env,
-		Endpoint:  opts.Endpoint,
-		Model:     e.Model(),
-		CreatedAt: time.Now().UTC(),
-		embedder:  e,
-	}
-	if ve, ok := e.(*VenuEmbedder); ok {
-		ix.EmbeddingEndpoint = ve.Endpoint()
-	}
-
-	ix.Types = make([]TypeEmbedding, 0, len(entries))
-	for _, entry := range entries {
-		ix.Types = append(ix.Types, entry.TypeEmbedding)
-	}
-	sort.Slice(ix.Types, func(i, j int) bool { return ix.Types[i].Name < ix.Types[j].Name })
-
-	if len(ix.Types) > 0 {
-		ix.Dim = len(ix.Types[0].Embedding)
-	}
-	ix.normalize()
-	return ix, nil
+	return firstErr
 }
 
 // BuildEmbeddingIndexFromClient introspects through client and builds an index
@@ -225,13 +357,7 @@ func BuildEmbeddingIndexFromClient(ctx context.Context, client Client, e Embedde
 	return BuildEmbeddingIndex(ctx, introspection, e, opts)
 }
 
-// indexEntry is a TypeEmbedding plus the text that gets embedded for it.
-type indexEntry struct {
-	TypeEmbedding
-	embedText string
-}
-
-func selectIndexTypes(typesList []interface{}, opts EmbeddingIndexOptions) ([]indexEntry, error) {
+func selectIndexTypes(typesList []interface{}, opts EmbeddingIndexOptions) ([]buildEntry, error) {
 	maxChars := opts.MaxChars
 	if maxChars <= 0 {
 		maxChars = DefaultEmbeddingMaxChars
@@ -244,7 +370,7 @@ func selectIndexTypes(typesList []interface{}, opts EmbeddingIndexOptions) ([]in
 		}
 	}
 
-	var entries []indexEntry
+	var entries []buildEntry
 	for _, raw := range typesList {
 		tm, ok := raw.(map[string]interface{})
 		if !ok {
@@ -269,28 +395,91 @@ func selectIndexTypes(typesList []interface{}, opts EmbeddingIndexOptions) ([]in
 
 		description, _ := tm["description"].(string)
 		sdl := strings.TrimRight(FormatTypeSDL(tm, opts.ShowArgs, false), "\n")
-		text := buildEmbedText(name, kind, description, sdl, maxChars)
+		// Keep the kind in the text: "input_object" vs "object" is real signal
+		// separating CreateUserInput from User.
+		text := buildEmbedText(strings.ToLower(kind)+" type", name, description, sdl, maxChars)
 
-		sum := sha256.Sum256([]byte(text))
-		entries = append(entries, indexEntry{
-			TypeEmbedding: TypeEmbedding{
-				Name:        name,
-				Kind:        kind,
-				Description: description,
-				SDL:         sdl,
-				TextHash:    "sha256:" + hex.EncodeToString(sum[:]),
-			},
-			embedText: text,
+		entries = append(entries, buildEntry{
+			bucket:      bucketType,
+			name:        name,
+			returnKey:   kind,
+			description: description,
+			sdl:         sdl,
+			textHash:    textHash(text),
+			embedText:   text,
 		})
 	}
 	return entries, nil
 }
 
-// buildEmbedText assembles the text embedded for a type: name and kind first so
-// they survive truncation, then the description, then the SDL body.
-func buildEmbedText(name, kind, description, sdl string, maxChars int) string {
+// selectOperationFields indexes the fields of a root type (Query or Mutation)
+// as individually searchable operations, distinct from the type-level index.
+func selectOperationFields(typesList []interface{}, rootTypeName string, bucket opBucket, opts EmbeddingIndexOptions) ([]buildEntry, error) {
+	maxChars := opts.MaxChars
+	if maxChars <= 0 {
+		maxChars = DefaultEmbeddingMaxChars
+	}
+
+	var rootFields []interface{}
+	for _, raw := range typesList {
+		tm, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if name, _ := tm["name"].(string); name == rootTypeName {
+			rootFields, _ = tm["fields"].([]interface{})
+			break
+		}
+	}
+
+	var entries []buildEntry
+	for _, raw := range rootFields {
+		fm, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := fm["name"].(string)
+		if name == "" {
+			continue
+		}
+
+		keep, err := matchesNameGlobs(name, opts.Include, opts.Exclude)
+		if err != nil {
+			return nil, err
+		}
+		if !keep {
+			continue
+		}
+
+		description, _ := fm["description"].(string)
+		returnType := formatTypeRef(fm["type"])
+		sdl := strings.TrimSpace(formatSDLField(fm, true, false))
+		text := buildEmbedText(bucket.label(), name, description, sdl, maxChars)
+
+		entries = append(entries, buildEntry{
+			bucket:      bucket,
+			name:        name,
+			returnKey:   returnType,
+			description: description,
+			sdl:         sdl,
+			textHash:    textHash(text),
+			embedText:   text,
+		})
+	}
+	return entries, nil
+}
+
+func textHash(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// buildEmbedText assembles the text embedded for an entry: kind/category and
+// name first so they survive truncation, then the description, then the SDL
+// body.
+func buildEmbedText(kindLabel, name, description, sdl string, maxChars int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "GraphQL %s type: %s\n", strings.ToLower(kind), name)
+	fmt.Fprintf(&b, "GraphQL %s: %s\n", strings.ToLower(kindLabel), name)
 	if description != "" {
 		fmt.Fprintf(&b, "Description: %s\n", description)
 	}
@@ -332,27 +521,41 @@ func matchesNameGlobs(name string, include, exclude []string) (bool, error) {
 	return true, nil
 }
 
-func introspectionTypes(introspection map[string]interface{}) ([]interface{}, error) {
+// introspectionSchema extracts the schema's type list and root type names
+// (queryType/mutationType may be empty if the schema has none).
+func introspectionSchema(introspection map[string]interface{}) (typesList []interface{}, queryType, mutationType string, err error) {
 	data, ok := introspection["data"].(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("invalid introspection response: missing data")
+		return nil, "", "", fmt.Errorf("invalid introspection response: missing data")
 	}
 	schema, ok := data["__schema"].(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("invalid introspection response: missing __schema")
+		return nil, "", "", fmt.Errorf("invalid introspection response: missing __schema")
 	}
-	typesList, ok := schema["types"].([]interface{})
+	typesList, ok = schema["types"].([]interface{})
 	if !ok {
-		return nil, fmt.Errorf("invalid introspection response: missing types")
+		return nil, "", "", fmt.Errorf("invalid introspection response: missing types")
 	}
-	return typesList, nil
+	if qt, ok := schema["queryType"].(map[string]interface{}); ok {
+		queryType, _ = qt["name"].(string)
+	}
+	if mt, ok := schema["mutationType"].(map[string]interface{}); ok {
+		mutationType, _ = mt["name"].(string)
+	}
+	return typesList, queryType, mutationType, nil
 }
 
-// normalize scales every vector to unit length so Search can use a dot product.
-// Vectors already unit length (as Venu returns) are left untouched.
+// normalize scales every vector to unit length so Search can use a dot
+// product. Vectors already unit length (as Venu returns) are left untouched.
 func (ix *EmbeddingIndex) normalize() {
 	for i := range ix.Types {
 		normalizeVector(ix.Types[i].Embedding)
+	}
+	for i := range ix.Queries {
+		normalizeVector(ix.Queries[i].Embedding)
+	}
+	for i := range ix.Mutations {
+		normalizeVector(ix.Mutations[i].Embedding)
 	}
 }
 
@@ -380,10 +583,11 @@ func (ix *EmbeddingIndex) SetEmbedder(e Embedder) { ix.embedder = e }
 // Embedder returns the attached embedder, or nil.
 func (ix *EmbeddingIndex) Embedder() Embedder { return ix.embedder }
 
-// Search embeds query and returns the topN closest types, best first. It fails
-// if the attached embedder's model differs from the one that built the index —
-// scores across vector spaces are meaningless.
-func (ix *EmbeddingIndex) Search(ctx context.Context, query string, topN int) ([]TypeMatch, error) {
+// Search embeds query once and ranks it against all three categories,
+// returning up to topN hits per category. It fails if the attached embedder's
+// model differs from the one that built the index — scores across vector
+// spaces are meaningless.
+func (ix *EmbeddingIndex) Search(ctx context.Context, query string, topN int) (*SearchResults, error) {
 	if ix.embedder == nil {
 		return nil, fmt.Errorf("embedding search: no embedder attached (call SetEmbedder)")
 	}
@@ -401,57 +605,97 @@ func (ix *EmbeddingIndex) Search(ctx context.Context, query string, topN int) ([
 	return ix.SearchVector(vec, topN)
 }
 
-// SearchVector ranks the index against an already-computed query vector. No
-// network calls; useful when the caller embeds queries itself or reuses one
-// vector across several indexes.
-func (ix *EmbeddingIndex) SearchVector(vec []float32, topN int) ([]TypeMatch, error) {
+// SearchVector ranks an already-computed query vector against all three
+// categories. No network calls; useful when the caller embeds queries itself
+// or reuses one vector across several indexes.
+func (ix *EmbeddingIndex) SearchVector(vec []float32, topN int) (*SearchResults, error) {
+	query, err := ix.prepareQueryVector(vec)
+	if err != nil {
+		return nil, err
+	}
+	if topN <= 0 {
+		topN = 5
+	}
+
+	return &SearchResults{
+		Queries:   rankOperations(ix.Queries, query, topN),
+		Mutations: rankOperations(ix.Mutations, query, topN),
+		Types:     rankTypes(ix.Types, query, topN),
+	}, nil
+}
+
+func (ix *EmbeddingIndex) prepareQueryVector(vec []float32) ([]float32, error) {
 	if len(vec) == 0 {
 		return nil, fmt.Errorf("embedding search: query vector is empty")
 	}
 	if ix.Dim > 0 && len(vec) != ix.Dim {
 		return nil, fmt.Errorf("embedding search: query vector has %d dimensions, index has %d", len(vec), ix.Dim)
 	}
-	if topN <= 0 {
-		topN = 5
-	}
-
 	query := make([]float32, len(vec))
 	copy(query, vec)
 	normalizeVector(query)
+	return query, nil
+}
 
-	matches := make([]TypeMatch, 0, len(ix.Types))
-	for _, t := range ix.Types {
-		if len(t.Embedding) != len(query) {
+func cosine(a, b []float32) (float64, bool) {
+	if len(a) != len(b) {
+		return 0, false
+	}
+	var dot float64
+	for i := range a {
+		dot += float64(a[i]) * float64(b[i])
+	}
+	return dot, true
+}
+
+func rankTypes(types []TypeEmbedding, query []float32, topN int) []TypeMatch {
+	matches := make([]TypeMatch, 0, len(types))
+	for _, t := range types {
+		dot, ok := cosine(query, t.Embedding)
+		if !ok {
 			continue
 		}
-		var dot float64
-		for i := range query {
-			dot += float64(query[i]) * float64(t.Embedding[i])
-		}
 		matches = append(matches, TypeMatch{
-			Name:        t.Name,
-			Kind:        t.Kind,
-			Description: t.Description,
-			SDL:         t.SDL,
-			Score:       dot,
+			Name: t.Name, Kind: t.Kind, Description: t.Description, SDL: t.SDL, Score: dot,
 		})
 	}
-
 	sort.SliceStable(matches, func(i, j int) bool {
 		if matches[i].Score != matches[j].Score {
 			return matches[i].Score > matches[j].Score
 		}
 		return matches[i].Name < matches[j].Name
 	})
-
 	if len(matches) > topN {
 		matches = matches[:topN]
 	}
-	return matches, nil
+	return matches
 }
 
-// LoadEmbeddingIndex reads an index file written by SaveEmbeddingIndex and
-// normalizes its vectors for search.
+func rankOperations(ops []OperationEmbedding, query []float32, topN int) []OperationMatch {
+	matches := make([]OperationMatch, 0, len(ops))
+	for _, o := range ops {
+		dot, ok := cosine(query, o.Embedding)
+		if !ok {
+			continue
+		}
+		matches = append(matches, OperationMatch{
+			Name: o.Name, ReturnType: o.ReturnType, Description: o.Description, SDL: o.SDL, Score: dot,
+		})
+	}
+	sort.SliceStable(matches, func(i, j int) bool {
+		if matches[i].Score != matches[j].Score {
+			return matches[i].Score > matches[j].Score
+		}
+		return matches[i].Name < matches[j].Name
+	})
+	if len(matches) > topN {
+		matches = matches[:topN]
+	}
+	return matches
+}
+
+// LoadEmbeddingIndex reads an index file written by Save and normalizes its
+// vectors for search.
 func LoadEmbeddingIndex(path string) (*EmbeddingIndex, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -464,11 +708,18 @@ func LoadEmbeddingIndex(path string) (*EmbeddingIndex, error) {
 	if ix.Version > EmbeddingIndexVersion {
 		return nil, fmt.Errorf("embedding index %s has version %d, this build understands up to %d", path, ix.Version, EmbeddingIndexVersion)
 	}
-	if len(ix.Types) == 0 {
-		return nil, fmt.Errorf("embedding index %s contains no types", path)
+	if len(ix.Types) == 0 && len(ix.Queries) == 0 && len(ix.Mutations) == 0 {
+		return nil, fmt.Errorf("embedding index %s contains no types or operations", path)
 	}
 	if ix.Dim == 0 {
-		ix.Dim = len(ix.Types[0].Embedding)
+		switch {
+		case len(ix.Types) > 0:
+			ix.Dim = len(ix.Types[0].Embedding)
+		case len(ix.Queries) > 0:
+			ix.Dim = len(ix.Queries[0].Embedding)
+		case len(ix.Mutations) > 0:
+			ix.Dim = len(ix.Mutations[0].Embedding)
+		}
 	}
 	ix.normalize()
 	return &ix, nil

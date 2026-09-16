@@ -91,10 +91,11 @@ func TestBuildEmbeddingIndexRanksClosestTypes(t *testing.T) {
 	}
 
 	ix.SetEmbedder(e)
-	matches, err := ix.Search(context.Background(), "invoice", 1)
+	results, err := ix.Search(context.Background(), "invoice", 1)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
+	matches := results.Types
 	if len(matches) != 1 || matches[0].Name != "Invoice" {
 		t.Fatalf("expected Invoice first, got %+v", matches)
 	}
@@ -119,10 +120,11 @@ func TestSearchTopNAndOrdering(t *testing.T) {
 	}
 	ix.SetEmbedder(e)
 
-	matches, err := ix.Search(context.Background(), "user user user", 2)
+	results, err := ix.Search(context.Background(), "user user user", 2)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
+	matches := results.Types
 	if len(matches) != 2 {
 		t.Fatalf("expected 2 matches, got %d", len(matches))
 	}
@@ -146,12 +148,12 @@ func TestSearchDefaultsToFiveAndRejectsModelMismatch(t *testing.T) {
 	}
 
 	ix.SetEmbedder(e)
-	matches, err := ix.Search(context.Background(), "user", 0)
+	results, err := ix.Search(context.Background(), "user", 0)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	if len(matches) != 5 {
-		t.Errorf("topN 0 should default to 5, got %d", len(matches))
+	if len(results.Types) != 5 {
+		t.Errorf("topN 0 should default to 5, got %d", len(results.Types))
 	}
 
 	ix.SetEmbedder(&fakeEmbedder{model: "other-model"})
@@ -288,12 +290,12 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	}
 
 	loaded.SetEmbedder(e)
-	matches, err := loaded.Search(context.Background(), "invoice", 1)
+	results, err := loaded.Search(context.Background(), "invoice", 1)
 	if err != nil {
 		t.Fatalf("search loaded index: %v", err)
 	}
-	if matches[0].Name != "Invoice" {
-		t.Errorf("expected Invoice, got %s", matches[0].Name)
+	if results.Types[0].Name != "Invoice" {
+		t.Errorf("expected Invoice, got %s", results.Types[0].Name)
 	}
 }
 
@@ -359,11 +361,11 @@ func TestLoadNormalizesVectors(t *testing.T) {
 	}
 
 	// A zero vector stays zero and scores 0 rather than producing NaN.
-	matches, err := ix.SearchVector([]float32{1, 0}, 2)
+	results, err := ix.SearchVector([]float32{1, 0}, 2)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	for _, m := range matches {
+	for _, m := range results.Types {
 		if math.IsNaN(m.Score) {
 			t.Fatalf("NaN score for %s", m.Name)
 		}
@@ -383,7 +385,7 @@ func TestEmbeddingIndexPath(t *testing.T) {
 }
 
 func TestBuildEmbedTextTruncatesAfterHeader(t *testing.T) {
-	text := buildEmbedText("User", "OBJECT", "a user", strings.Repeat("x", 500), 60)
+	text := buildEmbedText("object type", "User", "a user", strings.Repeat("x", 500), 60)
 	if len(text) != 60 {
 		t.Fatalf("expected truncation to 60 chars, got %d", len(text))
 	}
@@ -454,5 +456,282 @@ func TestSearchUsesEmbedQueryWhenAvailable(t *testing.T) {
 	}
 	if ix.Embedder() == nil {
 		t.Error("Embedder() should return the attached embedder")
+	}
+}
+
+// rootType builds a Query/Mutation root object whose fields carry args, the
+// way FullIntrospectionQuery returns them.
+func rootType(name string, fields ...map[string]interface{}) map[string]interface{} {
+	list := make([]interface{}, 0, len(fields))
+	for _, f := range fields {
+		list = append(list, f)
+	}
+	return map[string]interface{}{"kind": "OBJECT", "name": name, "fields": list}
+}
+
+func rootField(name, description, returnType string, args ...string) map[string]interface{} {
+	argList := make([]interface{}, 0, len(args))
+	for _, a := range args {
+		argList = append(argList, map[string]interface{}{
+			"name": a,
+			"type": map[string]interface{}{"kind": "SCALAR", "name": "String"},
+		})
+	}
+	return map[string]interface{}{
+		"name":        name,
+		"description": description,
+		"args":        argList,
+		"type":        map[string]interface{}{"kind": "OBJECT", "name": returnType},
+	}
+}
+
+func categorizedIntrospection() map[string]interface{} {
+	intro := testIntrospection(
+		objectType("User", "a user account", "email"),
+		objectType("Invoice", "an invoice", "total"),
+		rootType("Query",
+			rootField("user", "fetch a user by id", "User", "id"),
+			rootField("invoices", "list invoices", "Invoice"),
+		),
+		rootType("Mutation",
+			rootField("createUser", "create a user account", "User", "email"),
+		),
+	)
+	schema := intro["data"].(map[string]interface{})["__schema"].(map[string]interface{})
+	schema["queryType"] = map[string]interface{}{"name": "Query"}
+	schema["mutationType"] = map[string]interface{}{"name": "Mutation"}
+	return intro
+}
+
+func TestBuildEmbeddingIndexSplitsCategories(t *testing.T) {
+	e := &fakeEmbedder{model: "fake-1"}
+	ix, err := BuildEmbeddingIndex(context.Background(), categorizedIntrospection(), e, EmbeddingIndexOptions{})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	if len(ix.Queries) != 2 {
+		t.Errorf("queries = %d, want 2: %+v", len(ix.Queries), ix.Queries)
+	}
+	if len(ix.Mutations) != 1 || ix.Mutations[0].Name != "createUser" {
+		t.Errorf("mutations = %+v", ix.Mutations)
+	}
+	// The root types themselves stay in the types category too.
+	if len(ix.Types) != 4 {
+		t.Errorf("types = %d, want 4: %+v", len(ix.Types), typeNames(ix))
+	}
+
+	var createUser OperationEmbedding
+	for _, m := range ix.Mutations {
+		if m.Name == "createUser" {
+			createUser = m
+		}
+	}
+	if createUser.ReturnType != "User" {
+		t.Errorf("return type = %q, want User", createUser.ReturnType)
+	}
+	if createUser.SDL != "createUser(email: String): User" {
+		t.Errorf("operation SDL = %q", createUser.SDL)
+	}
+	if createUser.Description != "create a user account" {
+		t.Errorf("description = %q", createUser.Description)
+	}
+}
+
+func typeNames(ix *EmbeddingIndex) []string {
+	var names []string
+	for _, t := range ix.Types {
+		names = append(names, t.Name)
+	}
+	return names
+}
+
+func TestSearchRanksEachCategoryIndependently(t *testing.T) {
+	e := &fakeEmbedder{model: "fake-1"}
+	ix, err := BuildEmbeddingIndex(context.Background(), categorizedIntrospection(), e, EmbeddingIndexOptions{})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	ix.SetEmbedder(e)
+
+	results, err := ix.Search(context.Background(), "invoice", 1)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	// topN applies per category, so one hit from each populated category.
+	if len(results.Queries) != 1 || results.Queries[0].Name != "invoices" {
+		t.Errorf("queries = %+v, want invoices", results.Queries)
+	}
+	if len(results.Types) != 1 || results.Types[0].Name != "Invoice" {
+		t.Errorf("types = %+v, want Invoice", results.Types)
+	}
+	if len(results.Mutations) != 1 || results.Mutations[0].Name != "createUser" {
+		t.Errorf("mutations = %+v", results.Mutations)
+	}
+}
+
+func TestSkipQueriesAndMutations(t *testing.T) {
+	e := &fakeEmbedder{model: "fake-1"}
+	ix, err := BuildEmbeddingIndex(context.Background(), categorizedIntrospection(), e, EmbeddingIndexOptions{
+		SkipQueries:   true,
+		SkipMutations: true,
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if len(ix.Queries) != 0 || len(ix.Mutations) != 0 {
+		t.Errorf("expected no operations, got %d queries and %d mutations", len(ix.Queries), len(ix.Mutations))
+	}
+	if len(ix.Types) == 0 {
+		t.Error("types should still be indexed")
+	}
+}
+
+func TestOperationGlobFiltersApply(t *testing.T) {
+	e := &fakeEmbedder{model: "fake-1"}
+	ix, err := BuildEmbeddingIndex(context.Background(), categorizedIntrospection(), e, EmbeddingIndexOptions{
+		Exclude: []string{"invoices", "Invoice"},
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	for _, q := range ix.Queries {
+		if q.Name == "invoices" {
+			t.Error("excluded query field was indexed")
+		}
+	}
+	for _, tt := range ix.Types {
+		if tt.Name == "Invoice" {
+			t.Error("excluded type was indexed")
+		}
+	}
+}
+
+func TestRebuildReusesOperationVectors(t *testing.T) {
+	intro := categorizedIntrospection()
+	e := &fakeEmbedder{model: "fake-1"}
+	first, err := BuildEmbeddingIndex(context.Background(), intro, e, EmbeddingIndexOptions{})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	before := atomic.LoadInt32(&e.calls)
+
+	second, err := BuildEmbeddingIndex(context.Background(), intro, e, EmbeddingIndexOptions{Previous: first})
+	if err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+	if got := atomic.LoadInt32(&e.calls) - before; got != 0 {
+		t.Errorf("unchanged schema should cost 0 embed calls, got %d", got)
+	}
+	if len(second.Queries) != len(first.Queries) || len(second.Mutations) != len(first.Mutations) {
+		t.Error("categories lost on rebuild")
+	}
+}
+
+func TestSaveLoadRoundTripsCategories(t *testing.T) {
+	e := &fakeEmbedder{model: "fake-1"}
+	ix, err := BuildEmbeddingIndex(context.Background(), categorizedIntrospection(), e, EmbeddingIndexOptions{})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "index.json")
+	if err := ix.Save(path); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	loaded, err := LoadEmbeddingIndex(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(loaded.Queries) != len(ix.Queries) || len(loaded.Mutations) != len(ix.Mutations) {
+		t.Fatalf("categories not persisted: %d queries, %d mutations", len(loaded.Queries), len(loaded.Mutations))
+	}
+
+	loaded.SetEmbedder(e)
+	results, err := loaded.Search(context.Background(), "user", 2)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results.Queries) == 0 || len(results.Mutations) == 0 {
+		t.Error("loaded index should still rank operations")
+	}
+}
+
+// A v1 index written before categories existed has no queries/mutations keys;
+// it must still load and search.
+func TestLoadIndexWithoutOperationCategories(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.json")
+	raw, _ := json.Marshal(map[string]interface{}{
+		"version": 1,
+		"model":   "fake-1",
+		"dim":     2,
+		"types": []TypeEmbedding{
+			{Name: "User", Kind: "OBJECT", SDL: "type User", TextHash: "sha256:x", Embedding: []float32{1, 0}},
+		},
+	})
+	if err := writeFileString(path, string(raw)); err != nil {
+		t.Fatal(err)
+	}
+
+	ix, err := LoadEmbeddingIndex(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	ix.SetEmbedder(&fakeEmbedder{model: "fake-1"})
+	results, err := ix.Search(context.Background(), "user", 3)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results.Types) != 1 {
+		t.Errorf("types = %+v", results.Types)
+	}
+	if len(results.Queries) != 0 || len(results.Mutations) != 0 {
+		t.Error("legacy index should yield no operation matches")
+	}
+}
+
+func TestOperationsOnlyIndexLoads(t *testing.T) {
+	e := &fakeEmbedder{model: "fake-1"}
+	ix, err := BuildEmbeddingIndex(context.Background(), categorizedIntrospection(), e, EmbeddingIndexOptions{
+		Include: []string{"user", "createUser"},
+		Kinds:   []string{"ENUM"}, // matches no type, so Types ends up empty
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if len(ix.Types) != 0 {
+		t.Fatalf("expected no types, got %+v", typeNames(ix))
+	}
+	if ix.Dim == 0 {
+		t.Error("dim should be inferred from operation vectors")
+	}
+
+	path := filepath.Join(t.TempDir(), "ops.json")
+	if err := ix.Save(path); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if _, err := LoadEmbeddingIndex(path); err != nil {
+		t.Fatalf("an index with only operations must load: %v", err)
+	}
+}
+
+func TestSchemaWithoutMutationRoot(t *testing.T) {
+	intro := testIntrospection(
+		objectType("User", "a user", "id"),
+		rootType("Query", rootField("user", "fetch a user", "User", "id")),
+	)
+	schema := intro["data"].(map[string]interface{})["__schema"].(map[string]interface{})
+	schema["queryType"] = map[string]interface{}{"name": "Query"}
+
+	e := &fakeEmbedder{model: "fake-1"}
+	ix, err := BuildEmbeddingIndex(context.Background(), intro, e, EmbeddingIndexOptions{})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if len(ix.Queries) != 1 {
+		t.Errorf("queries = %+v", ix.Queries)
+	}
+	if len(ix.Mutations) != 0 {
+		t.Errorf("mutations should be empty, got %+v", ix.Mutations)
 	}
 }

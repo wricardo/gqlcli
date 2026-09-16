@@ -48,26 +48,39 @@ Depth behavior for describe:
 - `--depth 1` includes directly referenced non-scalar types
 - `--depth N` recursively expands non-scalar references up to N levels (including `UNION`/`INTERFACE` `possibleTypes`) (including `UNION`/`INTERFACE` `possibleTypes`)
 
-## Semantic type search (find types by meaning)
+## Semantic search (find things by meaning)
 
-When you don't know the type's name, search by description instead of guessing names with
-`types --filter`. Needs `VENU_API_KEY` in the environment.
+When you don't know the name, search by description instead of guessing with `types --filter`.
+Needs `VENU_API_KEY` in the environment.
+
+Results come back in three separately-ranked categories: **queries** (Query root fields),
+**mutations** (Mutation root fields) and **types** (everything else). Ask for an operation and
+you get the operation, not just types that mention the same words.
 
 ```bash
 gqlcli embed index                        # build .gqlcli-embeddings[.<env>].json (one-time)
 gqlcli embed index --env prod --force     # rebuild from scratch for an env
-gqlcli embed search 'sms provider credentials'          # top 5 types + their SDL
-gqlcli embed search --top 10 --no-sdl 'billing address' # names, kinds, scores only
-gqlcli embed search --kind INPUT_OBJECT 'create a campaign'
-gqlcli embed search --min-score 0.45 -f json 'user email'
+
+gqlcli embed search 'pause an sms conversation'        # 5 queries + 5 mutations + 5 types
+gqlcli embed search -c mutations 'create a campaign'   # one category
+gqlcli embed search -c queries --no-sdl 'scorecard results for an agent'
+gqlcli embed search -c operations --top 10 'send a one off sms'   # queries + mutations
+gqlcli embed search -c types --kind INPUT_OBJECT --min-score 0.5 'campaign settings'
+gqlcli embed search -f json --no-sdl 'user email'
 ```
 
+- `--category`/`-c` takes `queries`, `mutations`, `types`, `operations` (= queries + mutations),
+  or `all`. `--top`/`-n` applies **per category**. `--kind` only narrows the types category.
+- Operation hits print the call signature, e.g.
+  `pauseConversation(subscriptionId: ID!, reason: String): ConversationPauseResult!` — enough to
+  write the mutation without a `describe` round-trip.
 - The index is per environment; `--env prod` reads/writes `.gqlcli-embeddings.prod.json`. Pin a
   path with `-o`/`-i`, or an `"embeddings"` key on the env in `.gqlcli.json`.
-- Re-running `embed index` only re-embeds types whose SDL changed, so it is cheap to keep current.
-- Scores are cosine similarity (0-1); anything below ~0.4 is usually noise. Types with no
-  descriptions match poorly — fall back to `types --filter` there.
-- Follow a hit with `gqlcli describe <Type> --depth 1` for the full definition.
+- Re-running `embed index` only re-embeds entries whose text changed, so it is cheap to keep
+  current. `--no-queries` / `--no-mutations` skip a category.
+- Scores are cosine similarity (0-1); anything below ~0.4 is usually noise. Entries with no
+  descriptions match poorly — fall back to `types --filter` / `mutations --filter` there.
+- Follow a type hit with `gqlcli describe <Type> --depth 1` for the full definition.
 
 ## List operations (queries and mutations)
 

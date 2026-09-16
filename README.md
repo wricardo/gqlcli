@@ -90,7 +90,7 @@ gqlcli queries --filter user -f compact         # Minimal JSON
 - **`op`** — Save, list, show, and delete named operations in `.gqlcli.json`
 - **`types`** — List all schema types with filtering
 - **`describe`** — Print SDL definition of a named type
-- **`embed`** — Build a semantic index of the schema's types and search it in plain language
+- **`embed`** — Build a semantic index of the schema and search queries, mutations and types by meaning
 - **`queries`** — Discover available Query fields instantly
 - **`mutations`** — Discover available Mutation fields instantly
 
@@ -696,25 +696,43 @@ TYPE_NAME                    Name of the type to describe (required)
 
 ---
 
-## 🔎 Semantic Type Search (`embed`)
+## 🔎 Semantic Search (`embed`)
 
-`describe` and `types --filter` need the type's name. `embed` finds types by meaning, for when
-you know what you want but not what it is called.
+`describe` and `types --filter` need the name. `embed` finds things by meaning, for when you know
+what you want but not what it is called.
+
+Matches come back in **three categories**, each ranked and returned separately:
+
+| Category | What it holds |
+|----------|---------------|
+| **queries** | Fields of the `Query` root — the schema's read entry points |
+| **mutations** | Fields of the `Mutation` root — the write entry points |
+| **types** | Every other type (OBJECT, INPUT_OBJECT, ENUM, INTERFACE, UNION, SCALAR) |
+
+The split matters: "pause an sms conversation" should surface the `pauseConversation` **mutation**,
+not just types that mention conversations. Asking for an operation and asking for a data shape are
+different questions, so they get separate candidate pools.
 
 ```bash
-# Build the index once (one embedding call per type, then cached by content hash)
+# Build the index once (one embedding call per entry, then cached by content hash)
 gqlcli embed index
 
-# Ask in plain language
-gqlcli embed search 'thing that stores a customer billing address'
+# Ask in plain language — 5 queries, 5 mutations and 5 types by default
+gqlcli embed search 'pause an sms conversation for a lead'
 
-# Narrow by kind, keep only strong matches, print names only
-gqlcli embed search --kind INPUT_OBJECT --min-score 0.45 --no-sdl 'create a campaign'
+# One category at a time
+gqlcli embed search --category mutations 'create a campaign'
+gqlcli embed search -c queries --no-sdl 'scorecard results for an agent'
+gqlcli embed search -c operations --top 10 'send a one off sms'   # queries + mutations
+
+# Narrow the types category by kind, keep only strong matches
+gqlcli embed search -c types --kind INPUT_OBJECT --min-score 0.5 'campaign settings'
 ```
 
-`embed search` prints each match with its cosine similarity and its SDL, ready to paste into a
-prompt. `--format json|table|compact|toon` switches output; `--top N` changes the hit count
-(default 5).
+Each hit prints its cosine similarity and its SDL — a type definition, or an operation's call
+signature (`pauseConversation(subscriptionId: ID!, reason: String): ConversationPauseResult!`) —
+ready to paste into a query or a prompt. `--top N` applies **per category**. `--format
+json|table|compact|toon` switches output; `--no-sdl` prints names, kinds and scores only.
 
 **The index file.** `embed index` writes `.gqlcli-embeddings.json`, or
 `.gqlcli-embeddings.<env>.json` when an environment is selected — one file per environment, since
@@ -730,16 +748,17 @@ environment with an `"embeddings"` key in `.gqlcli.json`:
 }
 ```
 
-Re-running `embed index` re-embeds only types whose text changed (compared by SHA-256 hash), so
-keeping the index in git is cheap. `--force` re-embeds everything.
+Re-running `embed index` re-embeds only entries whose text changed (compared by SHA-256 hash), so
+keeping the index in git is cheap. `--force` re-embeds everything; `--no-queries` / `--no-mutations`
+skip a category entirely.
 
 **Embedding provider.** Embeddings come from the Venu API (`POST {base}/embeddings`, `X-API-Key`).
 Set `VENU_API_KEY`; `VENU_URL` and `VENU_EMBEDDING_MODEL` (or `--embedding-url`, `--embedding-key`,
 `--embedding-model`) change host and model. The default is `nomic-embed-text-v1.5`, for which the
 required `search_document:` / `search_query:` task prefixes are applied automatically.
 
-Only type name, description and SDL are embedded — types with no descriptions and generic field
-names have little for the model to work with, so expect weaker matches there.
+Only names, descriptions and SDL are embedded — entries with no descriptions and generic names have
+little for the model to work with, so expect weaker matches there.
 
 ### From Go
 
@@ -751,7 +770,7 @@ if err != nil {
 
 // Build and persist an index.
 ix, err := gqlcli.BuildEmbeddingIndexFromClient(ctx, client, embedder, gqlcli.EmbeddingIndexOptions{
-	Kinds:    []string{"OBJECT", "INPUT_OBJECT"},
+	Kinds:    []string{"OBJECT", "INPUT_OBJECT"},   // applies to the types category only
 	Exclude:  []string{"*Connection", "*Edge"},
 	ShowArgs: true,
 })
@@ -762,16 +781,19 @@ if err := ix.Save(gqlcli.EmbeddingIndexPath("prod")); err != nil {
 	log.Fatal(err)
 }
 
-// Later: load and find the top 5 types for a description.
+// Later: load and find the top 5 per category for a description.
 ix, err = gqlcli.LoadEmbeddingIndex(gqlcli.EmbeddingIndexPath("prod"))
 if err != nil {
 	log.Fatal(err)
 }
 ix.SetEmbedder(embedder)
 
-matches, err := ix.Search(ctx, "sms provider credentials", 5)
-for _, m := range matches {
-	fmt.Printf("%-30s %-14s %.4f\n%s\n", m.Name, m.Kind, m.Score, m.SDL)
+results, err := ix.Search(ctx, "pause an sms conversation", 5)
+if err != nil {
+	log.Fatal(err)
+}
+for _, m := range results.Mutations {   // also results.Queries, results.Types
+	fmt.Printf("%-30s %-24s %.4f\n%s\n", m.Name, m.ReturnType, m.Score, m.SDL)
 }
 ```
 
@@ -781,12 +803,13 @@ for _, m := range matches {
 | `QueryEmbedder` | Optional `EmbedQuery` for models that embed queries differently from documents |
 | `NewVenuEmbedder(opts...)` | Venu-backed embedder; options for URL, key, model, task prefixes, HTTP client |
 | `BuildEmbeddingIndex` / `BuildEmbeddingIndexFromClient` | Build an index from an introspection response or a `Client` |
-| `EmbeddingIndex.Search(ctx, text, topN)` | Embed the text and return the closest types |
+| `EmbeddingIndex.Search(ctx, text, topN)` | Embed once, return `*SearchResults` with topN per category |
 | `EmbeddingIndex.SearchVector(vec, topN)` | Rank against a vector you already have — no network call |
+| `SearchResults` | `Queries` / `Mutations` (`[]OperationMatch`) and `Types` (`[]TypeMatch`) |
 | `LoadEmbeddingIndex` / `Save` / `EmbeddingIndexPath` | Persistence and the per-environment default path |
 
-`Search` refuses to run when the index's model differs from the embedder's — scores across
-vector spaces are meaningless. Both CLI modes (HTTP and inline) expose the same `embed index` and
+`Search` refuses to run when the index's model differs from the embedder's — scores across vector
+spaces are meaningless. Both CLI modes (HTTP and inline) expose the same `embed index` and
 `embed search` commands.
 
 ---

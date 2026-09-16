@@ -44,3 +44,4 @@ gqlcli.wiki/
 
 # type embedding indexes
 .gqlcli-embeddings*.json
+.gqlcli.json
