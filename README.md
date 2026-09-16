@@ -142,6 +142,9 @@ gqlcli queries --args
 gqlcli queries --filter user
 gqlcli mutations --filter campaign
 
+# Expand referenced arg/return types too (one command instead of queries + describe)
+gqlcli queries --filter user --args --depth 1
+
 # Different formats
 gqlcli queries -f json-pretty
 gqlcli mutations -f table

@@ -523,7 +523,8 @@ func (b *CLIBuilder) GetQueriesCommand() *cli.Command {
 			"Examples:\n" +
 			"  gqlcli queries\n" +
 			"  gqlcli queries --args --desc\n" +
-			"  gqlcli queries --filter user --args",
+			"  gqlcli queries --filter user --args\n" +
+				"  gqlcli queries --filter user --args --depth 1",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "url",
@@ -555,6 +556,11 @@ func (b *CLIBuilder) GetQueriesCommand() *cli.Command {
 				Name:  "filter",
 				Usage: "Filter fields by name (case-insensitive substring match)",
 			},
+			&cli.IntFlag{
+				Name:  "depth",
+				Usage: "Recursively include referenced non-scalar return types up to this depth (0 = none)",
+				Value: 0,
+			},
 			&cli.StringFlag{
 				Name:    "format",
 				Aliases: []string{"f"},
@@ -572,6 +578,28 @@ func (b *CLIBuilder) GetQueriesCommand() *cli.Command {
 				return err
 			}
 			b.client = NewHTTPClient(b.config)
+
+			if depth := c.Int("depth"); depth > 0 {
+				if depth < 0 {
+					return fmt.Errorf("--depth must be >= 0")
+				}
+				httpClient, ok := b.client.(*HTTPClient)
+				if !ok {
+					return fmt.Errorf("--depth requires HTTP mode")
+				}
+				d := NewDescriberFromHTTPClient(httpClient)
+				out, err := d.DescribeWithOptions(context.Background(), "Query", DescribeOptions{
+					FieldFilter:      c.String("filter"),
+					ShowArgs:         c.Bool("args"),
+					ShowDescriptions: c.Bool("desc"),
+					Depth:            depth,
+				})
+				if err != nil {
+					return err
+				}
+				fmt.Print(out)
+				return nil
+			}
 
 			// Build and execute introspection query
 			query := buildOperationListQuery("Query", c.Bool("desc"), c.Bool("args"))
@@ -636,7 +664,8 @@ func (b *CLIBuilder) GetMutationsCommand() *cli.Command {
 			"Examples:\n" +
 			"  gqlcli mutations\n" +
 			"  gqlcli mutations --args --desc\n" +
-			"  gqlcli mutations --filter create --args",
+			"  gqlcli mutations --filter create --args\n" +
+				"  gqlcli mutations --filter create --args --depth 1",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "url",
@@ -668,6 +697,11 @@ func (b *CLIBuilder) GetMutationsCommand() *cli.Command {
 				Name:  "filter",
 				Usage: "Filter fields by name (case-insensitive substring match)",
 			},
+			&cli.IntFlag{
+				Name:  "depth",
+				Usage: "Recursively include referenced non-scalar return types up to this depth (0 = none)",
+				Value: 0,
+			},
 			&cli.StringFlag{
 				Name:    "format",
 				Aliases: []string{"f"},
@@ -685,6 +719,28 @@ func (b *CLIBuilder) GetMutationsCommand() *cli.Command {
 				return err
 			}
 			b.client = NewHTTPClient(b.config)
+
+			if depth := c.Int("depth"); depth > 0 {
+				if depth < 0 {
+					return fmt.Errorf("--depth must be >= 0")
+				}
+				httpClient, ok := b.client.(*HTTPClient)
+				if !ok {
+					return fmt.Errorf("--depth requires HTTP mode")
+				}
+				d := NewDescriberFromHTTPClient(httpClient)
+				out, err := d.DescribeWithOptions(context.Background(), "Mutation", DescribeOptions{
+					FieldFilter:      c.String("filter"),
+					ShowArgs:         c.Bool("args"),
+					ShowDescriptions: c.Bool("desc"),
+					Depth:            depth,
+				})
+				if err != nil {
+					return err
+				}
+				fmt.Print(out)
+				return nil
+			}
 
 			// Build and execute introspection query
 			query := buildOperationListQuery("Mutation", c.Bool("desc"), c.Bool("args"))

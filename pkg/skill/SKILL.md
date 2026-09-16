@@ -92,13 +92,20 @@ gqlcli queries --args --desc                    # include argument signatures an
 gqlcli queries --filter citizen                 # filter by operation name substring
 gqlcli queries --filter citizen --args --desc   # practical discovery view
 gqlcli queries --filter citizen -f json         # machine-readable output
+gqlcli queries --filter citizen --args --depth 1  # also expand referenced return/input types
 
 gqlcli mutations                                # list all Mutation fields
 gqlcli mutations --args --desc                  # include argument signatures and descriptions
 gqlcli mutations --filter create                # filter by operation name substring
 gqlcli mutations --filter citizen --args --desc # practical discovery view
 gqlcli mutations --filter citizen -f json       # machine-readable output
+gqlcli mutations --filter create --args --depth 1 # also expand referenced input/return types
 ```
+
+`--depth` on `queries`/`mutations` works like `describe`'s `--depth`: 0 = only the filtered
+field signatures (default), N = recursively expand their non-scalar arg/return types N levels
+deep. Combine with `--filter` to get one op's full call shape in a single command instead of a
+`queries --filter` + `describe` round-trip. Ignores `--format` (always prints SDL) when > 0.
 
 Suggested flow:
 - Run `queries` or `mutations` to discover operation names and arguments
