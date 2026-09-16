@@ -48,6 +48,27 @@ Depth behavior for describe:
 - `--depth 1` includes directly referenced non-scalar types
 - `--depth N` recursively expands non-scalar references up to N levels (including `UNION`/`INTERFACE` `possibleTypes`) (including `UNION`/`INTERFACE` `possibleTypes`)
 
+## Semantic type search (find types by meaning)
+
+When you don't know the type's name, search by description instead of guessing names with
+`types --filter`. Needs `VENU_API_KEY` in the environment.
+
+```bash
+gqlcli embed index                        # build .gqlcli-embeddings[.<env>].json (one-time)
+gqlcli embed index --env prod --force     # rebuild from scratch for an env
+gqlcli embed search 'sms provider credentials'          # top 5 types + their SDL
+gqlcli embed search --top 10 --no-sdl 'billing address' # names, kinds, scores only
+gqlcli embed search --kind INPUT_OBJECT 'create a campaign'
+gqlcli embed search --min-score 0.45 -f json 'user email'
+```
+
+- The index is per environment; `--env prod` reads/writes `.gqlcli-embeddings.prod.json`. Pin a
+  path with `-o`/`-i`, or an `"embeddings"` key on the env in `.gqlcli.json`.
+- Re-running `embed index` only re-embeds types whose SDL changed, so it is cheap to keep current.
+- Scores are cosine similarity (0-1); anything below ~0.4 is usually noise. Types with no
+  descriptions match poorly — fall back to `types --filter` there.
+- Follow a hit with `gqlcli describe <Type> --depth 1` for the full definition.
+
 ## List operations (queries and mutations)
 
 Use these to discover top-level operations before writing a query or mutation body.

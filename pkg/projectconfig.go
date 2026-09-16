@@ -54,6 +54,9 @@ type EnvConfig struct {
 	URL     string            `json:"url"`
 	Headers map[string]string `json:"headers,omitempty"`
 	Login   *EnvLoginConfig   `json:"login,omitempty"`
+	// Embeddings pins the type-embedding index file for this environment,
+	// overriding the default .gqlcli-embeddings[.<env>].json path.
+	Embeddings string `json:"embeddings,omitempty"`
 }
 
 // EnvLoginConfig stores the login mutation and token path for an environment,

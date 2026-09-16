@@ -79,6 +79,7 @@ func (cs *InlineCommandSet) Commands() []*cli.Command {
 		cs.batchCommand(),
 		cs.describeCommand(),
 		cs.typesCommand(),
+		cs.embedCommand(),
 	}
 	if cs.login != nil {
 		cmds = append(cmds, cs.loginCommand(), cs.logoutCommand(), cs.whoamiCommand())

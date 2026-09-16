@@ -90,6 +90,7 @@ gqlcli queries --filter user -f compact         # Minimal JSON
 - **`op`** — Save, list, show, and delete named operations in `.gqlcli.json`
 - **`types`** — List all schema types with filtering
 - **`describe`** — Print SDL definition of a named type
+- **`embed`** — Build a semantic index of the schema's types and search it in plain language
 - **`queries`** — Discover available Query fields instantly
 - **`mutations`** — Discover available Mutation fields instantly
 
@@ -692,6 +693,101 @@ TYPE_NAME                    Name of the type to describe (required)
 --env VALUE                  Environment from .gqlcli.json
 -d, --debug                  Enable debug logging
 ```
+
+---
+
+## 🔎 Semantic Type Search (`embed`)
+
+`describe` and `types --filter` need the type's name. `embed` finds types by meaning, for when
+you know what you want but not what it is called.
+
+```bash
+# Build the index once (one embedding call per type, then cached by content hash)
+gqlcli embed index
+
+# Ask in plain language
+gqlcli embed search 'thing that stores a customer billing address'
+
+# Narrow by kind, keep only strong matches, print names only
+gqlcli embed search --kind INPUT_OBJECT --min-score 0.45 --no-sdl 'create a campaign'
+```
+
+`embed search` prints each match with its cosine similarity and its SDL, ready to paste into a
+prompt. `--format json|table|compact|toon` switches output; `--top N` changes the hit count
+(default 5).
+
+**The index file.** `embed index` writes `.gqlcli-embeddings.json`, or
+`.gqlcli-embeddings.<env>.json` when an environment is selected — one file per environment, since
+vectors from one schema say nothing about another. Override the path with `-o`/`-i`, or pin it per
+environment with an `"embeddings"` key in `.gqlcli.json`:
+
+```json
+{
+  "default": "local",
+  "environments": {
+    "prod": { "url": "https://api.example.com/graphql", "embeddings": "schema/prod-embeddings.json" }
+  }
+}
+```
+
+Re-running `embed index` re-embeds only types whose text changed (compared by SHA-256 hash), so
+keeping the index in git is cheap. `--force` re-embeds everything.
+
+**Embedding provider.** Embeddings come from the Venu API (`POST {base}/embeddings`, `X-API-Key`).
+Set `VENU_API_KEY`; `VENU_URL` and `VENU_EMBEDDING_MODEL` (or `--embedding-url`, `--embedding-key`,
+`--embedding-model`) change host and model. The default is `nomic-embed-text-v1.5`, for which the
+required `search_document:` / `search_query:` task prefixes are applied automatically.
+
+Only type name, description and SDL are embedded — types with no descriptions and generic field
+names have little for the model to work with, so expect weaker matches there.
+
+### From Go
+
+```go
+embedder, err := gqlcli.NewVenuEmbedder(gqlcli.WithEmbeddingAPIKey(os.Getenv("VENU_API_KEY")))
+if err != nil {
+	log.Fatal(err)
+}
+
+// Build and persist an index.
+ix, err := gqlcli.BuildEmbeddingIndexFromClient(ctx, client, embedder, gqlcli.EmbeddingIndexOptions{
+	Kinds:    []string{"OBJECT", "INPUT_OBJECT"},
+	Exclude:  []string{"*Connection", "*Edge"},
+	ShowArgs: true,
+})
+if err != nil {
+	log.Fatal(err)
+}
+if err := ix.Save(gqlcli.EmbeddingIndexPath("prod")); err != nil {
+	log.Fatal(err)
+}
+
+// Later: load and find the top 5 types for a description.
+ix, err = gqlcli.LoadEmbeddingIndex(gqlcli.EmbeddingIndexPath("prod"))
+if err != nil {
+	log.Fatal(err)
+}
+ix.SetEmbedder(embedder)
+
+matches, err := ix.Search(ctx, "sms provider credentials", 5)
+for _, m := range matches {
+	fmt.Printf("%-30s %-14s %.4f\n%s\n", m.Name, m.Kind, m.Score, m.SDL)
+}
+```
+
+| API | Purpose |
+|-----|---------|
+| `Embedder` | `Embed(ctx, text) ([]float32, error)` + `Model() string` — implement for another provider |
+| `QueryEmbedder` | Optional `EmbedQuery` for models that embed queries differently from documents |
+| `NewVenuEmbedder(opts...)` | Venu-backed embedder; options for URL, key, model, task prefixes, HTTP client |
+| `BuildEmbeddingIndex` / `BuildEmbeddingIndexFromClient` | Build an index from an introspection response or a `Client` |
+| `EmbeddingIndex.Search(ctx, text, topN)` | Embed the text and return the closest types |
+| `EmbeddingIndex.SearchVector(vec, topN)` | Rank against a vector you already have — no network call |
+| `LoadEmbeddingIndex` / `Save` / `EmbeddingIndexPath` | Persistence and the per-environment default path |
+
+`Search` refuses to run when the index's model differs from the embedder's — scores across
+vector spaces are meaningless. Both CLI modes (HTTP and inline) expose the same `embed index` and
+`embed search` commands.
 
 ---
 
