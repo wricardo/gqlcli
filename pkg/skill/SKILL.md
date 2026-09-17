@@ -332,12 +332,25 @@ gqlcli query '{ users { id status } }' --format json \
   | gqlcli batch
 ```
 
-## jq filtering on single queries
+## jq filtering on single queries/mutations
+
+`query` and `mutation` both have a built-in `--jq` (no external `jq` binary needed, same
+engine as `batch`'s jq). It applies to the full response envelope (`{"data":...}`), so start
+expressions from `.data`. It only runs when the operation succeeds — on a GraphQL or transport
+error, the raw error output is shown untouched by jq, so failures stay visible instead of being
+silently swallowed by a jq expression written for the success shape.
 
 ```bash
-# Pipe --format json to jq for client-side filtering
+gqlcli query '{ users { id name } }' --jq '.data.users[].name'
+gqlcli query '{ users { id } }' --jq '.data.users | length'
+gqlcli mutation '...' --jq '.data.createUser.id'
+```
+
+Piping to an external `jq` still works and behaves the same as before (applies regardless of
+error, since it runs on the shell's stdout independently of gqlcli's exit code):
+
+```bash
 gqlcli query '{ users { id name } }' --format json | jq '.data.users[].name'
-gqlcli query '{ users { id } }' --format json | jq '.data.users | length'
 ```
 
 ## HTTP controls

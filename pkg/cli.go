@@ -122,8 +122,12 @@ func (b *CLIBuilder) GetQueryCommand() *cli.Command {
 			"Variables: --variables '{\"id\":\"123\"}' (inline JSON) or --variables-file vars.json.\n\n" +
 			"Use --format llm for LLM-friendly output; --format json when parsing programmatically.\n\n" +
 			"JQ FILTERING\n" +
-			"  Pipe --format json output to jq to extract specific fields:\n" +
-			"    gqlcli query '{ users { id name } }' --format json | jq '.data.users[].name'\n\n" +
+			"  --jq EXPR applies a built-in jq expression to the full response envelope,\n" +
+			"  so start from .data. Only runs when the query succeeds — on a GraphQL or\n" +
+			"  transport error the raw error output is shown instead, untouched by jq:\n" +
+			"    gqlcli query '{ users { id name } }' --jq '.data.users[].name'\n\n" +
+			"  Equivalent to piping to an external jq, without losing error visibility on failure:\n" +
+			"    gqlcli query '{ users { id name } }' --format json | jq '.data.users'\n\n" +
 			"BATCHING\n" +
 			"  To run multiple queries in one request, use the 'batch' command:\n" +
 			"    echo '{\"query\":\"{ users { id } }\"}' | gqlcli batch\n\n" +
@@ -131,7 +135,7 @@ func (b *CLIBuilder) GetQueryCommand() *cli.Command {
 			"  gqlcli query '{ users { id name } }'\n" +
 			"  gqlcli query '{ user(id:$id) { name } }' --variables '{\"id\":\"42\"}'\n" +
 			"  gqlcli query --query-file myquery.graphql --format llm\n" +
-			"  gqlcli query '{ users { id name } }' --format json | jq '.data.users'",
+			"  gqlcli query '{ users { id name } }' --jq '.data.users[].name'",
 		Flags: b.getOperationFlags(),
 		Action: func(c *cli.Context) error {
 			if err := b.applyEnvConfig(c); err != nil {
@@ -180,8 +184,10 @@ func (b *CLIBuilder) GetMutationCommand() *cli.Command {
 			"Variables: --variables '{\"id\":\"123\"}' or --variables-file vars.json.\n" +
 			"--input shortcut: pass the input object directly; it is automatically wrapped as {\"input\":{...}}.\n\n" +
 			"JQ FILTERING\n" +
-			"  Pipe --format json output to jq to extract specific fields:\n" +
-			"    gqlcli mutation '...' --format json | jq '.data.createUser.id'\n\n" +
+			"  --jq EXPR applies a built-in jq expression to the full response envelope,\n" +
+			"  so start from .data. Only runs when the mutation succeeds — on a GraphQL or\n" +
+			"  transport error the raw error output is shown instead, untouched by jq:\n" +
+			"    gqlcli mutation '...' --jq '.data.createUser.id'\n\n" +
 			"BATCHING\n" +
 			"  To run multiple mutations in one request, use the 'batch' command:\n" +
 			"    printf '{\"query\":\"mutation { a { ok } }\"}\\n{\"query\":\"mutation { b { ok } }\"}\\n' | gqlcli batch\n\n" +
@@ -190,7 +196,7 @@ func (b *CLIBuilder) GetMutationCommand() *cli.Command {
 			"  gqlcli mutation 'mutation CreateUser($input: CreateUserInput!) { createUser(input: $input) { id } }' \\\n" +
 			"    --input '{\"name\":\"Alice\",\"email\":\"alice@example.com\"}'\n" +
 			"  gqlcli mutation --mutation-file create_user.graphql --variables-file vars.json\n" +
-			"  gqlcli mutation '...' --format json | jq '.data.createUser'",
+			"  gqlcli mutation '...' --jq '.data.createUser'",
 		Flags: append(b.getOperationFlags(),
 			&cli.StringFlag{
 				Name:  "input",
@@ -920,6 +926,10 @@ func (b *CLIBuilder) getOperationFlags() []cli.Flag {
 			Name:  "output",
 			Usage: "Output file path (default: stdout)",
 		},
+		&cli.StringFlag{
+			Name:  "jq",
+			Usage: "Apply jq expression to the response envelope (built-in, skipped on error so the raw error stays visible)",
+		},
 		&cli.BoolFlag{
 			Name:    "include-headers",
 			Aliases: []string{"i"},
@@ -1110,11 +1120,25 @@ func (b *CLIBuilder) handleError(c *cli.Context, err error) error {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "Query:\n%s\n\n", formatQueryForError(gqlErr.Query))
-	_ = b.outputResult(c, gqlErr.Response)
+	_ = b.outputResultOpts(c, gqlErr.Response, false)
 	return cli.Exit("", 1)
 }
 
+// outputResult formats and prints a successful response, applying --jq (if set).
 func (b *CLIBuilder) outputResult(c *cli.Context, result map[string]interface{}) error {
+	return b.outputResultOpts(c, result, true)
+}
+
+// outputResultOpts formats and prints result. allowJQ gates --jq: the error path
+// (via handleError) passes false so a jq expression written against a successful
+// shape never silently swallows a GraphQL/transport error's raw output.
+func (b *CLIBuilder) outputResultOpts(c *cli.Context, result map[string]interface{}, allowJQ bool) error {
+	if allowJQ {
+		if jqExpr := c.String("jq"); jqExpr != "" {
+			return b.outputJQResult(c, result, jqExpr)
+		}
+	}
+
 	meta := b.client.LastResponseMetadata()
 	if dumpHeadersFile := c.String("dump-headers"); dumpHeadersFile != "" {
 		if err := os.WriteFile(dumpHeadersFile, []byte(formatResponseHeaders(meta)), 0644); err != nil {
@@ -1150,6 +1174,34 @@ func (b *CLIBuilder) outputResult(c *cli.Context, result map[string]interface{})
 		return os.WriteFile(outputFile, []byte(output), 0644)
 	}
 
+	fmt.Fprintln(c.App.Writer, output)
+	return nil
+}
+
+// outputJQResult applies jqExpr to the full response envelope and prints each
+// resulting value on its own line, mirroring jq's own CLI output. --output still
+// redirects to a file instead of stdout.
+func (b *CLIBuilder) outputJQResult(c *cli.Context, result map[string]interface{}, jqExpr string) error {
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+
+	values, err := applyJQ(raw, jqExpr)
+	if err != nil {
+		return err
+	}
+
+	var sb strings.Builder
+	for _, v := range values {
+		sb.Write(v)
+		sb.WriteByte('\n')
+	}
+	output := strings.TrimSuffix(sb.String(), "\n")
+
+	if outputFile := c.String("output"); outputFile != "" {
+		return os.WriteFile(outputFile, []byte(output), 0644)
+	}
 	fmt.Fprintln(c.App.Writer, output)
 	return nil
 }

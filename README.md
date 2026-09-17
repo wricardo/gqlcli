@@ -82,8 +82,8 @@ gqlcli queries --filter user -f compact         # Minimal JSON
 ## ✨ CLI Features
 
 ### 🎯 Commands
-- **`query`** — Execute GraphQL queries with variables and multiple input methods
-- **`mutation`** — Execute mutations with auto-wrapped input objects
+- **`query`** — Execute GraphQL queries with variables, multiple input methods, and built-in `--jq` filtering
+- **`mutation`** — Execute mutations with auto-wrapped input objects and built-in `--jq` filtering
 - **`subscribe`** — Stream GraphQL subscription events over WebSocket (`graphql-transport-ws`)
 - **`batch`** — Execute multiple operations in one request (NDJSON or JSON array) with jq filtering
 - **`script`** — Run JavaScript workflow scripts with async/await and `gql.each()` concurrency control
@@ -176,6 +176,9 @@ gqlcli query \
 
 # Saved named operation (from .gqlcli.json)
 gqlcli query --op get-user --variables '{"id":"123"}'
+
+# Built-in jq filtering — skipped on error so failures stay visible
+gqlcli query "{ users { id name } }" --jq '.data.users[].name'
 ```
 
 ### Mutations
@@ -1455,6 +1458,8 @@ Latest features:
 - ✅ **Batch operations** — execute multiple queries/mutations in one request (NDJSON + JSON array)
 - ✅ **Server-side jq filtering** — per-operation `"jq"` field for response transformation
 - ✅ **Client-side jq** — `--jq` flag applies jq to all batch responses
+- ✅ **`--jq` on `query`/`mutation`** — built-in jq filtering on a single operation's response, skipped on error so failures stay visible
+- ✅ **`--depth` on `queries`/`mutations`** — expand a filtered operation's referenced arg/return types in one command
 - ✅ `.gqlcli.json` project config — named environments with URL and custom headers, `--env` flag
 - ✅ Inline execution — run operations in-process against a gqlgen schema (no HTTP server)
 - ✅ Schema hints — attach type SDL to GraphQL validation errors
