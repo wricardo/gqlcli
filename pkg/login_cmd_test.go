@@ -120,6 +120,43 @@ func TestAutoReloginIfExpired_NoOpWhenTokenStillValid(t *testing.T) {
 	}
 }
 
+func TestAutoReloginIfExpired_BootstrapsWhenTokenIsMissing(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	var loginCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		loginCalls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"login":{"token":"` + signedJWT(t, time.Now().Add(time.Hour)) + `"}}}`))
+	}))
+	defer server.Close()
+
+	b := &CLIBuilder{config: &Config{}, projectConfig: &ProjectConfig{Environments: map[string]EnvConfig{
+		"prod": {URL: server.URL},
+	}}}
+	env := EnvConfig{
+		URL: server.URL,
+		Login: &EnvLoginConfig{
+			Mutation:     "mutation Login($email:String!){ login(email:$email){ token } }",
+			TokenPath:    "login.token",
+			Credentials:  map[string]interface{}{"email": "you@example.com"},
+			HeaderName:   "Authorization",
+			HeaderPrefix: "Bearer",
+		},
+	}
+	headers := map[string]string{} // no Authorization header at all — first run
+
+	if err := b.autoReloginIfExpired("prod", env, headers, false); err != nil {
+		t.Fatalf("autoReloginIfExpired: %v", err)
+	}
+	if loginCalls != 1 {
+		t.Fatalf("expected 1 login mutation call to bootstrap a missing token, got %d", loginCalls)
+	}
+	if headers["Authorization"] == "" {
+		t.Fatalf("expected headers to be populated with a fresh token")
+	}
+}
+
 func TestAutoReloginIfExpired_NoOpWithoutSavedCredentials(t *testing.T) {
 	t.Chdir(t.TempDir())
 

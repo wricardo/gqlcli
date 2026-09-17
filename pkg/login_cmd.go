@@ -226,15 +226,19 @@ func (b *CLIBuilder) GetLogoutCommand() *cli.Command {
 }
 
 // autoReloginIfExpired checks the environment's saved bearer token for JWT
-// expiry and, when `login --save-creds` has stashed a mutation + credentials
-// for this env, re-authenticates and updates headers in place plus persists
-// the fresh token to .gqlcli.json.
+// expiry — or its absence — and, when `login --save-creds` has stashed a
+// mutation + credentials for this env, re-authenticates and updates headers
+// in place plus persists the fresh token to .gqlcli.json.
 //
 // It is a deliberate no-op — never an error — whenever there is nothing safe
-// to act on: no Login config, no saved Credentials, no token under the
-// configured header, a token that isn't a parseable JWT, or a JWT with no
-// numeric "exp" claim. Only an actual re-login attempt that fails surfaces
-// an error, since at that point the caller already knows the token is stale.
+// to act on: no Login config, no saved Credentials, a token that isn't a
+// parseable JWT, or a JWT with no numeric "exp" claim (in both cases the
+// existing header, even if present, is left alone since its shape can't be
+// verified). A missing/empty token under the configured header IS treated as
+// needing login, since --save-creds also persists HeaderName/HeaderPrefix,
+// which only exist to make that bootstrap case unambiguous. Only an actual
+// re-login attempt that fails surfaces an error, since at that point the
+// caller already knows the token is stale or missing.
 func (b *CLIBuilder) autoReloginIfExpired(envName string, env EnvConfig, headers map[string]string, insecure bool) error {
 	if env.Login == nil || env.Login.Mutation == "" || env.Login.TokenPath == "" || len(env.Login.Credentials) == 0 {
 		return nil
@@ -244,30 +248,29 @@ func (b *CLIBuilder) autoReloginIfExpired(envName string, env EnvConfig, headers
 	if headerName == "" {
 		headerName = "Authorization"
 	}
-	current, ok := headers[headerName]
-	if !ok || current == "" {
-		return nil
-	}
+	current := headers[headerName]
 
-	token := current
-	if env.Login.HeaderPrefix != "" {
-		token = strings.TrimPrefix(current, env.Login.HeaderPrefix+" ")
-	}
+	if current != "" {
+		token := current
+		if env.Login.HeaderPrefix != "" {
+			token = strings.TrimPrefix(current, env.Login.HeaderPrefix+" ")
+		}
 
-	claims, err := (&TokenStore{}).ParseClaims(token)
-	if err != nil {
-		return nil
-	}
-	expRaw, ok := claims.Raw["exp"]
-	if !ok {
-		return nil
-	}
-	expSeconds, ok := expRaw.(float64)
-	if !ok {
-		return nil
-	}
-	if time.Now().Before(time.Unix(int64(expSeconds), 0)) {
-		return nil
+		claims, err := (&TokenStore{}).ParseClaims(token)
+		if err != nil {
+			return nil
+		}
+		expRaw, ok := claims.Raw["exp"]
+		if !ok {
+			return nil
+		}
+		expSeconds, ok := expRaw.(float64)
+		if !ok {
+			return nil
+		}
+		if time.Now().Before(time.Unix(int64(expSeconds), 0)) {
+			return nil
+		}
 	}
 
 	client := NewHTTPClient(&Config{URL: env.URL, Insecure: insecure})
@@ -302,7 +305,11 @@ func (b *CLIBuilder) autoReloginIfExpired(envName string, env EnvConfig, headers
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "token for environment %q expired; re-authenticated automatically\n", envName)
+	reason := "expired"
+	if current == "" {
+		reason = "missing"
+	}
+	fmt.Fprintf(os.Stderr, "token for environment %q %s; re-authenticated automatically\n", envName, reason)
 	return nil
 }
 
