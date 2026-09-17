@@ -444,6 +444,19 @@ gqlcli logout --env prod
 the mutation + token-path under `environments.<name>.login` for future use.
 Custom header name or prefix: `--header X-Auth-Token --prefix ""`.
 
+`--save-creds` additionally persists the `--variables` (email/password) in plaintext under
+`environments.<name>.login.credentials`. With credentials saved, every command against that
+env checks the saved token's JWT `exp` claim before its request; once expired, it re-runs the
+login mutation automatically and persists the fresh token — no manual re-login needed. Only
+opt in on a machine you trust; `.gqlcli.json` gets `0600` perms whenever any env has saved
+credentials. No-op (existing header used as-is) when the token isn't a JWT, has no `exp`
+claim, is still valid, or no credentials were saved.
+
+```bash
+gqlcli login --env prod --mutation '...' --variables '{"email":"...","password":"..."}' \
+  --token-path login.token --save-creds
+```
+
 ## Other flags
 
 ```bash

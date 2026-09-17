@@ -15,10 +15,19 @@ func saveProjectConfig(cfg *ProjectConfig) error {
 	if err != nil {
 		return fmt.Errorf("encoding .gqlcli.json: %w", err)
 	}
-	if err := os.WriteFile(".gqlcli.json", data, 0644); err != nil {
+	// Any saved login credentials (from `login --save-creds`) are plaintext —
+	// keep the file readable only by the owner whenever they're present.
+	mode := os.FileMode(0644)
+	for _, env := range cfg.Environments {
+		if env.Login != nil && len(env.Login.Credentials) > 0 {
+			mode = 0600
+			break
+		}
+	}
+	if err := os.WriteFile(".gqlcli.json", data, mode); err != nil {
 		return fmt.Errorf("writing .gqlcli.json: %w", err)
 	}
-	return nil
+	return os.Chmod(".gqlcli.json", mode)
 }
 
 func loadOrCreateProjectConfig() (*ProjectConfig, error) {

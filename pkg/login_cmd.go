@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/urfave/cli/v2"
 )
@@ -24,7 +26,17 @@ func (b *CLIBuilder) GetLoginCommand() *cli.Command {
 			"    --variables '{\"email\":\"you@example.com\",\"password\":\"secret\"}' \\\n" +
 			"    --token-path login.token\n\n" +
 			"  # After storing login config in .gqlcli.json:\n" +
-			"  gqlcli login --env prod --variables '{\"email\":\"you@example.com\",\"password\":\"secret\"}'",
+			"  gqlcli login --env prod --variables '{\"email\":\"you@example.com\",\"password\":\"secret\"}'\n\n" +
+			"AUTO RE-LOGIN\n" +
+			"  --save-creds also persists --variables (e.g. email/password) under\n" +
+			"  environments.<env>.login.credentials, in plaintext, in .gqlcli.json.\n" +
+			"  With credentials saved, every command that talks to this environment\n" +
+			"  checks the saved token's JWT \"exp\" claim before the request; once it has\n" +
+			"  expired, it re-runs this login mutation automatically and persists the\n" +
+			"  fresh token — no manual 'gqlcli login' needed. Only opt in on a machine\n" +
+			"  you trust with the plaintext credentials.\n\n" +
+			"  gqlcli login --env prod --mutation '...' --variables '{\"email\":\"...\",\"password\":\"...\"}' \\\n" +
+			"    --token-path login.token --save-creds",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:     "env",
@@ -53,6 +65,10 @@ func (b *CLIBuilder) GetLoginCommand() *cli.Command {
 				Name:  "prefix",
 				Usage: "Value prefix prepended to the token",
 				Value: "Bearer",
+			},
+			&cli.BoolFlag{
+				Name:  "save-creds",
+				Usage: "Persist --variables to .gqlcli.json (plaintext) so an expired JWT auto re-logs in on future commands",
 			},
 			insecureFlag(),
 		},
@@ -136,12 +152,21 @@ func (b *CLIBuilder) GetLoginCommand() *cli.Command {
 				env.Login.TokenPath = tokenPath
 			}
 
+			if c.Bool("save-creds") {
+				env.Login.Credentials = variables
+				env.Login.HeaderName = headerName
+				env.Login.HeaderPrefix = prefix
+			}
+
 			cfg.Environments[envName] = env
 			if err := saveProjectConfig(cfg); err != nil {
 				return err
 			}
 
 			fmt.Printf("logged in; %s header saved to environment %q\n", headerName, envName)
+			if c.Bool("save-creds") {
+				fmt.Println("credentials saved to .gqlcli.json (plaintext) for automatic re-login on expiry")
+			}
 			return nil
 		},
 	}
@@ -198,6 +223,87 @@ func (b *CLIBuilder) GetLogoutCommand() *cli.Command {
 			return nil
 		},
 	}
+}
+
+// autoReloginIfExpired checks the environment's saved bearer token for JWT
+// expiry and, when `login --save-creds` has stashed a mutation + credentials
+// for this env, re-authenticates and updates headers in place plus persists
+// the fresh token to .gqlcli.json.
+//
+// It is a deliberate no-op — never an error — whenever there is nothing safe
+// to act on: no Login config, no saved Credentials, no token under the
+// configured header, a token that isn't a parseable JWT, or a JWT with no
+// numeric "exp" claim. Only an actual re-login attempt that fails surfaces
+// an error, since at that point the caller already knows the token is stale.
+func (b *CLIBuilder) autoReloginIfExpired(envName string, env EnvConfig, headers map[string]string, insecure bool) error {
+	if env.Login == nil || env.Login.Mutation == "" || env.Login.TokenPath == "" || len(env.Login.Credentials) == 0 {
+		return nil
+	}
+
+	headerName := env.Login.HeaderName
+	if headerName == "" {
+		headerName = "Authorization"
+	}
+	current, ok := headers[headerName]
+	if !ok || current == "" {
+		return nil
+	}
+
+	token := current
+	if env.Login.HeaderPrefix != "" {
+		token = strings.TrimPrefix(current, env.Login.HeaderPrefix+" ")
+	}
+
+	claims, err := (&TokenStore{}).ParseClaims(token)
+	if err != nil {
+		return nil
+	}
+	expRaw, ok := claims.Raw["exp"]
+	if !ok {
+		return nil
+	}
+	expSeconds, ok := expRaw.(float64)
+	if !ok {
+		return nil
+	}
+	if time.Now().Before(time.Unix(int64(expSeconds), 0)) {
+		return nil
+	}
+
+	client := NewHTTPClient(&Config{URL: env.URL, Insecure: insecure})
+	result, err := client.ExecuteMutation(context.Background(), ExecutionModeHTTP, MutationOptions{
+		Mutation:  env.Login.Mutation,
+		Variables: env.Login.Credentials,
+	})
+	if err != nil {
+		return fmt.Errorf("auto re-login for environment %q failed: %w", envName, err)
+	}
+
+	newToken, err := extractByPath(result["data"], env.Login.TokenPath)
+	if err != nil {
+		return fmt.Errorf("auto re-login for environment %q: extracting token at %q: %w", envName, env.Login.TokenPath, err)
+	}
+
+	newValue := newToken
+	if env.Login.HeaderPrefix != "" {
+		newValue = env.Login.HeaderPrefix + " " + newToken
+	}
+	headers[headerName] = newValue
+
+	if b.projectConfig != nil {
+		persisted := b.projectConfig.Environments[envName]
+		if persisted.Headers == nil {
+			persisted.Headers = make(map[string]string)
+		}
+		persisted.Headers[headerName] = newValue
+		b.projectConfig.Environments[envName] = persisted
+		if err := saveProjectConfig(b.projectConfig); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: auto re-login succeeded but failed to persist new token: %v\n", err)
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "token for environment %q expired; re-authenticated automatically\n", envName)
+	return nil
 }
 
 // extractByPath walks a dot-separated path through nested maps and returns the

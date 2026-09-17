@@ -1460,6 +1460,7 @@ Latest features:
 - ✅ **Client-side jq** — `--jq` flag applies jq to all batch responses
 - ✅ **`--jq` on `query`/`mutation`** — built-in jq filtering on a single operation's response, skipped on error so failures stay visible
 - ✅ **`--depth` on `queries`/`mutations`** — expand a filtered operation's referenced arg/return types in one command
+- ✅ **Auto re-login on expired JWT** — `login --save-creds` persists credentials so an expired token auto-refreshes before the next request (see [[Authentication]])
 - ✅ `.gqlcli.json` project config — named environments with URL and custom headers, `--env` flag
 - ✅ Inline execution — run operations in-process against a gqlgen schema (no HTTP server)
 - ✅ Schema hints — attach type SDL to GraphQL validation errors

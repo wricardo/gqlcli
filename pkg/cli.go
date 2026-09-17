@@ -50,7 +50,8 @@ func NewCLIBuilder(cfg *Config) *CLIBuilder {
 func (b *CLIBuilder) applyEnvConfig(c *cli.Context) error {
 	mergedHeaders := make(map[string]string)
 	if b.projectConfig != nil {
-		env, err := b.projectConfig.Resolve(c.String("env"))
+		envName := c.String("env")
+		env, err := b.projectConfig.Resolve(envName)
 		if err != nil {
 			return err
 		}
@@ -60,6 +61,14 @@ func (b *CLIBuilder) applyEnvConfig(c *cli.Context) error {
 			}
 			for k, v := range env.Headers {
 				mergedHeaders[k] = v
+			}
+
+			resolvedName := envName
+			if resolvedName == "" {
+				resolvedName = b.projectConfig.Default
+			}
+			if err := b.autoReloginIfExpired(resolvedName, *env, mergedHeaders, c.Bool("insecure")); err != nil {
+				return err
 			}
 		}
 	}
@@ -530,7 +539,7 @@ func (b *CLIBuilder) GetQueriesCommand() *cli.Command {
 			"  gqlcli queries\n" +
 			"  gqlcli queries --args --desc\n" +
 			"  gqlcli queries --filter user --args\n" +
-				"  gqlcli queries --filter user --args --depth 1",
+			"  gqlcli queries --filter user --args --depth 1",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "url",
@@ -671,7 +680,7 @@ func (b *CLIBuilder) GetMutationsCommand() *cli.Command {
 			"  gqlcli mutations\n" +
 			"  gqlcli mutations --args --desc\n" +
 			"  gqlcli mutations --filter create --args\n" +
-				"  gqlcli mutations --filter create --args --depth 1",
+			"  gqlcli mutations --filter create --args --depth 1",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "url",

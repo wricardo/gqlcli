@@ -61,9 +61,17 @@ type EnvConfig struct {
 
 // EnvLoginConfig stores the login mutation and token path for an environment,
 // so gqlcli login can re-authenticate without repeating the mutation string.
+//
+// Credentials, HeaderName, and HeaderPrefix are only populated when `login
+// --save-creds` is used; their presence is what lets an expired JWT trigger an
+// automatic re-login (see CLIBuilder.autoReloginIfExpired). Credentials are
+// written to .gqlcli.json in plaintext — only opt in on a trusted machine.
 type EnvLoginConfig struct {
-	Mutation  string `json:"mutation"`
-	TokenPath string `json:"token_path"`
+	Mutation     string                 `json:"mutation"`
+	TokenPath    string                 `json:"token_path"`
+	Credentials  map[string]interface{} `json:"credentials,omitempty"`
+	HeaderName   string                 `json:"header_name,omitempty"`
+	HeaderPrefix string                 `json:"header_prefix,omitempty"`
 }
 
 // LoadProjectConfig reads .gqlcli.json from the current directory.
