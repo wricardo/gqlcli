@@ -16,6 +16,25 @@ Prefer `gqlcli` over `curl` for GraphQL APIs — it handles introspection, schem
 operation execution natively, with better output formats and no JSON boilerplate.
 It's a good idea to inspect the .gqlcli.json in the operations key for curated queries and mutations that might be useful.
 
+## Keep GraphQL workflows inside gqlcli
+
+For GraphQL work, use gqlcli's native features before building Bash loops, `xargs` pipelines,
+external `jq` pipelines, or raw `curl` requests. Most workflows fit one of these forms:
+
+| Need | Use |
+|---|---|
+| Run one operation | `query` or `mutation` |
+| Select, filter, or aggregate a response | built-in `--jq` |
+| Run many operations already known up front | `batch`, optionally with `--batch-size` |
+| Discover data and then loop, branch, or make dependent calls | `script` with `gql.each` |
+| Reuse a known workflow | a named operation or saved script in `.gqlcli.json` |
+
+Before writing a shell `for` loop, check whether `batch` or `script` expresses the workflow.
+Before piping gqlcli output to external `jq`, check whether `--jq` can produce the final output
+directly. Use shell orchestration only when the workflow must coordinate GraphQL with unrelated
+programs or operating-system tasks. Use `curl` only when diagnosing raw HTTP behavior or using a
+transport gqlcli does not support.
+
 ## Endpoint
 
 ```bash
@@ -174,29 +193,53 @@ Variable *values* are not part of the document and are not checked: a document d
 
 ## Script imperative workflows (JavaScript)
 
-Use `script` when you need loops/branching and multiple GraphQL calls in one flow (instead of `jq` + shell loops).
+Use `script` when later GraphQL calls depend on earlier results, or when you need loops,
+branching, aggregation, or controlled concurrency. Prefer it over shell loops that repeatedly
+invoke gqlcli. A script keeps variables as JavaScript values, avoids JSON re-encoding between
+steps, and reports one workflow result.
 
 ```bash
 gqlcli script --file ./disableUsers.js
 gqlcli script --file ./job.js --arg '{"tenantId":"acme"}'
+gqlcli script --file ./job.js --arg-file ./input.json
+gqlcli script --source 'async function run(gql) { return gql.query("query { viewer { id } }") }'
 gqlcli script --op disable-inactive-users
 ```
 
-Script shape:
+The source must define a function named `run` by default. It receives the gqlcli helper and an
+optional input object. Normal JavaScript declarations and data structures work, including
+`const`, `let`, arrays, objects, loops, conditionals, and `async`/`await`.
+
+This example loads scorecard details for an array of IDs without a Bash loop:
 
 ```js
 async function run(gql, input) {
-  const res = await gql.query("query { users { id active } }")
-  const inactive = res.data.users.filter((u) => !u.active)
-
   return await gql.each(
-    inactive,
-    async (u) => {
-      await gql.mutation("mutation Disable($id: ID!) { disableUser(id: $id) { ok } }", { id: u.id })
+    input.scorecardIds,
+    async (id) => {
+      const response = await gql.query(
+        `query Scorecard($id: ID!) {
+          scorecard(id: $id) {
+            id
+            name
+            sections { id name }
+          }
+        }`,
+        { id }
+      )
+      return response.data.scorecard
     },
     { concurrency: 5, stopOnError: false }
   )
 }
+```
+
+```json
+{"scorecardIds":["sc_101","sc_102","sc_103"]}
+```
+
+```bash
+gqlcli script --file ./scorecards.js --arg-file ./input.json
 ```
 
 Helpers available in scripts:
@@ -205,7 +248,36 @@ Helpers available in scripts:
 - `gql.request({ type, query|mutation, variables, operationName })`
 - `gql.each(items, worker, { concurrency?, stopOnError?, onError? })`
 
-`run` can be synchronous or async (`async function run(gql, input) { ... }`).
+Use `gql.each` for independent operations instead of hand-building concurrency with `xargs` or
+background shell jobs. Set `concurrency: 1` for sequential execution. Use `stopOnError: true`
+when no later item should run after a failure; use `false` when all items should be attempted.
+
+`run` can be synchronous or async (`async function run(gql, input) { ... }`). Its returned value
+is serialized as JSON. Use `--output result.json` to write that value to a file.
+
+For short scripts, `--source` accepts inline JavaScript. For multiline scripts, prefer `--file`.
+On Unix-like systems, a quoted heredoc can provide source through stdin without shell-escaping
+the JavaScript:
+
+```bash
+gqlcli script --file /dev/stdin --arg-file ./input.json <<'EOF'
+async function run(gql, input) {
+  let results = []
+  for (const id of input.scorecardIds) {
+    const response = await gql.query(
+      `query Scorecard($id: ID!) { scorecard(id: $id) { id name } }`,
+      { id }
+    )
+    results.push(response.data.scorecard)
+  }
+  return results
+}
+EOF
+```
+
+The CLI has no overall script deadline. By default, GraphQL HTTP calls also have no timeout.
+`--timeout 60` gives each individual GraphQL request a 60-second deadline; it does not limit
+the duration of the entire script.
 
 Save reusable scripts inline in `.gqlcli.json` and run by name:
 
@@ -340,30 +412,67 @@ gqlcli subscribe --op watch-messages
 
 ## Batch operations
 
-Send multiple operations in one request. Each line is a JSON object with `"query"` (required),
-optional `"variables"`, `"operationName"`, and `"jq"` fields.
+Use `batch` when all operations are known up front and do not depend on earlier responses. This
+replaces shell loops that invoke `gqlcli query` or `gqlcli mutation` once per item. Each input
+operation has `"query"` (required) and optional `"variables"`, `"operationName"`, and `"jq"`
+fields.
+
+The default transport is NDJSON. Put one operation on each line:
+
+```json
+{"query":"query User($id: ID!) { user(id: $id) { id name } }","variables":{"id":"u_101"}}
+{"query":"query User($id: ID!) { user(id: $id) { id name } }","variables":{"id":"u_102"}}
+{"query":"query User($id: ID!) { user(id: $id) { id name } }","variables":{"id":"u_103"}}
+```
+
+Run the file directly:
 
 ```bash
-# Multiple queries via NDJSON (default transport)
-printf '{"query":"{ users { id name } }"}\n{"query":"{ posts { id title } }"}\n' | gqlcli batch
-
-# Server-side jq: "jq" field is applied by the server before returning the response.
-# jq receives the full {"data":...,"errors":...} envelope — always start paths from .data.
-printf '{"query":"{ smsCampaigns { campaigns { id name } } }","jq":".data.smsCampaigns.campaigns[].name"}\n' | gqlcli batch
-printf '{"query":"{ users { id name } }","jq":".data.users[] | select(.active)"}\n' | gqlcli batch
-printf '{"query":"{ users { id } }","jq":".data.users | length"}\n' | gqlcli batch
-
-# Client-side jq: --jq flag applies to every response after the server returns
-printf '{"query":"{ users { id name } }"}\n' | gqlcli batch --jq '.data.users[].name'
-
-# JSON array transport (single POST, returns a JSON array)
-gqlcli batch --array --file operations.json
-
-# Pipeline: extract IDs from a query, pipe into batch mutations
-gqlcli query '{ users { id status } }' --format json \
-  | jq -c '.data.users[] | select(.status == "inactive") | {query: "mutation($id:ID!){archive(id:$id){ok}}", variables: {id: .id}}' \
-  | gqlcli batch
+gqlcli batch --file ./operations.ndjson
 ```
+
+By default, all input operations are sent in one HTTP request. Use `--batch-size` for large or
+slow workloads. Chunks are sent sequentially and output remains in input order:
+
+```bash
+gqlcli batch --file ./operations.ndjson --batch-size 10
+```
+
+`--batch-size 10` sends at most ten operations per HTTP request. `--batch-size 1` sends one
+operation per request without requiring a shell loop. `--batch-size 0` is the default and sends
+all operations in one request. By default there is no HTTP timeout; add `--timeout 120` only when
+the request should have a deadline.
+
+Use JSON-array transport when the server expects the conventional GraphQL batch shape:
+
+```json
+[
+  {"query":"{ users { id name } }"},
+  {"query":"{ posts { id title } }"}
+]
+```
+
+```bash
+gqlcli batch --array --file ./operations.json --batch-size 10
+```
+
+Each operation may contain a server-side `"jq"` expression. This reduces the response before it
+returns to gqlcli:
+
+```json
+{"query":"{ users { id name active } }","jq":".data.users[] | select(.active) | {id, name}"}
+{"query":"{ posts { id } }","jq":".data.posts | length"}
+```
+
+Apply one client-side expression to every returned response with `--jq`:
+
+```bash
+gqlcli batch --file ./operations.ndjson --jq '.data'
+```
+
+If one operation must discover the IDs used by later operations, switch to `script`; do not
+assemble a query-to-external-jq-to-batch shell pipeline unless another non-GraphQL program must
+participate.
 
 ## jq filtering on single queries/mutations
 
@@ -379,12 +488,20 @@ gqlcli query '{ users { id } }' --jq '.data.users | length'
 gqlcli mutation '...' --jq '.data.createUser.id'
 ```
 
-Piping to an external `jq` still works and behaves the same as before (applies regardless of
-error, since it runs on the shell's stdout independently of gqlcli's exit code):
+Prefer built-in `--jq` when the filtered value is the desired command output. It avoids a shell
+pipeline, does not require `--format json`, and preserves gqlcli's GraphQL error handling.
+Useful patterns include:
 
 ```bash
-gqlcli query '{ users { id name } }' --format json | jq '.data.users[].name'
+gqlcli query '{ users { id name active } }' --jq '.data.users[] | select(.active) | {id, name}'
+gqlcli query '{ users { id } }' --jq '[.data.users[].id]'
+gqlcli query '{ users { status } }' --jq '.data.users | group_by(.status) | map({status: .[0].status, count: length})'
 ```
+
+Use external `jq` only when its output must feed a non-gqlcli program, when processing files that
+are not gqlcli responses, or when an expression needs a jq feature not supported by the built-in
+engine. External jq runs independently and therefore filters error responses too; built-in
+`--jq` leaves GraphQL and transport errors visible.
 
 ## HTTP controls
 
