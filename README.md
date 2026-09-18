@@ -629,7 +629,11 @@ Output is NDJSON subscription envelopes: `next`, `error`, and `complete`.
 --jq EXPR                    Filter the verdict shape
 ```
 
-Checks a document against the schema and reports each problem as `line:column: message`.
+Checks a document against the schema and reports each problem as `line:column: message`,
+followed by compact SDL for the type the message refers to. Machine-readable output puts that
+hint at `errors[].extensions.schemaHint` — the same path the executed path uses — so one jq
+expression works against both. The hint is rendered from the already-parsed schema, so it costs
+no extra requests and works with `--schema-file` and in inline mode.
 The operation is never sent: only the schema is fetched, so no resolver runs and no data
 changes. Exits 0 when the document is valid and 1 when it is not, so it can gate a build.
 `query`, `mutation` and `subscribe` accept `--validate-only` for the same check.
@@ -1128,9 +1132,17 @@ result := v.Validate(`{ users { nope } }`)
 if !result.Valid {
     for _, e := range result.Errors {
         fmt.Printf("%d:%d: %s (%s)\n", e.Line, e.Column, e.Message, e.Rule)
+        if e.SchemaHint != "" {
+            fmt.Println(e.SchemaHint) // compact SDL for the type the message names
+        }
     }
 }
 ```
+
+`SchemaHint` is rendered from the parsed schema the validator already holds, so it costs no
+extra requests — unlike the executed path's hint, which introspects the type per error.
+`result.Map()` places it at `errors[].extensions.schemaHint`, matching the executed path's
+shape.
 
 Other constructors, for when you already have the schema in some form:
 

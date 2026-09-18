@@ -152,6 +152,10 @@ gqlcli validate --mutation 'mutation { deleteUser(id:"1") { ok } }'
 gqlcli validate '{ users { nope } }' --format json
 gqlcli validate '{ users { nope } }' --jq '.errors[].message'
 
+# each error carries compact SDL for the type it refers to, at the same
+# extensions.schemaHint path the executed path uses
+gqlcli validate '{ users { nope } }' --jq '.errors[].extensions.schemaHint'
+
 # same check from the operation commands, which stop before sending
 gqlcli query --validate-only '{ users { id } }'
 gqlcli mutation --validate-only 'mutation { ... }'

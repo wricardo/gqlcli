@@ -17,6 +17,11 @@ type ValidationError struct {
 	Column  int    `json:"column,omitempty"`
 	Rule    string `json:"rule,omitempty"`
 	Path    string `json:"path,omitempty"`
+
+	// SchemaHint is compact SDL for the type the message refers to, empty when
+	// it names none. Map renders it under extensions, where the executed path
+	// puts its own hint.
+	SchemaHint string `json:"schemaHint,omitempty"`
 }
 
 // String renders the error as "line:column: message", omitting the position
@@ -53,7 +58,11 @@ func (r *ValidationResult) String() string {
 	}
 	lines := make([]string, 0, len(r.Errors))
 	for _, e := range r.Errors {
-		lines = append(lines, e.String())
+		line := e.String()
+		if e.SchemaHint != "" {
+			line += "\n" + indentLines(e.SchemaHint, "  ")
+		}
+		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -73,6 +82,11 @@ func (r *ValidationResult) Map() map[string]interface{} {
 		}
 		if e.Path != "" {
 			em["path"] = e.Path
+		}
+		// The executed path attaches its hint at extensions.schemaHint, so the
+		// same jq expression works against both.
+		if e.SchemaHint != "" {
+			em["extensions"] = map[string]interface{}{"schemaHint": e.SchemaHint}
 		}
 		errs = append(errs, em)
 	}
@@ -189,7 +203,9 @@ func (v *SchemaValidator) Validate(document string) *ValidationResult {
 	doc, errs := gqlparser.LoadQueryWithRules(v.schema, document, nil)
 	result := &ValidationResult{Valid: len(errs) == 0}
 	for _, err := range errs {
-		result.Errors = append(result.Errors, validationErrorFrom(err))
+		validationError := validationErrorFrom(err)
+		validationError.SchemaHint = schemaHintFromSchema(v.schema, validationError.Message)
+		result.Errors = append(result.Errors, validationError)
 	}
 	if doc != nil {
 		for _, op := range doc.Operations {
@@ -211,4 +227,12 @@ func validationErrorFrom(err *gqlerror.Error) ValidationError {
 		out.Path = err.Path.String()
 	}
 	return out
+}
+
+func indentLines(text, indent string) string {
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	for i, line := range lines {
+		lines[i] = indent + line
+	}
+	return strings.Join(lines, "\n")
 }
