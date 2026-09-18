@@ -62,6 +62,9 @@ func extractTypeFromErrorMsg(msg string) string {
 // FullIntrospectionQuery is the schema introspection document the clients use.
 // Exported so an embedder issuing introspection through its own transport asks
 // for the same shape the formatters expect.
+//
+// It requests directive definitions and nests ofType deeply enough for stacked
+// list types, both of which SchemaSDL needs to rebuild a loadable schema.
 const FullIntrospectionQuery = `
 		query IntrospectionQuery {
 			__schema {
@@ -70,6 +73,15 @@ const FullIntrospectionQuery = `
 				subscriptionType { name }
 				types {
 					...FullType
+				}
+				directives {
+					name
+					description
+					locations
+					isRepeatable
+					args {
+						...InputValue
+					}
 				}
 			}
 		}
@@ -126,6 +138,26 @@ const FullIntrospectionQuery = `
 					ofType {
 						kind
 						name
+						ofType {
+							kind
+							name
+							ofType {
+								kind
+								name
+								ofType {
+									kind
+									name
+									ofType {
+										kind
+										name
+										ofType {
+											kind
+											name
+										}
+									}
+								}
+							}
+						}
 					}
 				}
 			}

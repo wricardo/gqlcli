@@ -85,6 +85,8 @@ gqlcli queries --filter user -f compact         # Minimal JSON
 - **`query`** — Execute GraphQL queries with variables, multiple input methods, and built-in `--jq` filtering
 - **`mutation`** — Execute mutations with auto-wrapped input objects and built-in `--jq` filtering
 - **`subscribe`** — Stream GraphQL subscription events over WebSocket (`graphql-transport-ws`)
+- **`validate`** — Check a document against the schema without executing it; exits 1 on error
+- **`sdl`** — Print the endpoint's schema as a loadable SDL document (for offline validation)
 - **`batch`** — Execute multiple operations in one request (NDJSON or JSON array) with jq filtering
 - **`script`** — Run JavaScript workflow scripts with async/await and `gql.each()` concurrency control
 - **`op`** — Save, list, show, and delete named operations in `.gqlcli.json`
@@ -616,6 +618,43 @@ gqlcli types --output types.json
 
 Output is NDJSON subscription envelopes: `next`, `error`, and `complete`.
 
+### `validate` Command
+```
+-q, --query STRING           Document to validate
+--query-file PATH            Read the document from a file
+-m, --mutation STRING        Mutation document to validate
+--mutation-file PATH         Read the mutation from a file
+--schema-file PATH           Validate against SDL on disk instead of introspecting
+-f, --format STRING          Render the verdict as json/toon/table/compact/llm instead of text
+--jq EXPR                    Filter the verdict shape
+```
+
+Checks a document against the schema and reports each problem as `line:column: message`.
+The operation is never sent: only the schema is fetched, so no resolver runs and no data
+changes. Exits 0 when the document is valid and 1 when it is not, so it can gate a build.
+`query`, `mutation` and `subscribe` accept `--validate-only` for the same check.
+
+Variable *values* are not part of the document and are not checked — a document declaring
+required variables validates on its own.
+
+```bash
+gqlcli validate '{ users { id name } }'
+gqlcli query --validate-only '{ users { nope } }'
+
+# validate offline, with no network and no credentials
+gqlcli sdl > schema.graphql
+gqlcli validate --schema-file schema.graphql '{ users { id } }'
+```
+
+### `sdl` Command
+```
+-o, --output PATH            Write the SDL to a file instead of stdout
+```
+
+Introspects the endpoint and prints its whole schema as SDL that any GraphQL parser can
+load back. Builtin scalars and directives are omitted, since every parser supplies them.
+Use `describe` instead to read a few types in a compact form.
+
 ### `op` Command
 ```
 gqlcli op save --name NAME (--query QUERY | --mutation MUTATION | --subscription SUBSCRIPTION) [--defaults JSON]
@@ -1068,6 +1107,57 @@ d := client.Describer() // schema discovery against the same in-process schema
 The `ExecutionMode` argument is ignored by `InlineClient` — it selects between transports, and
 an inline client is already one. `LastResponseMetadata` returns nil, since an in-process call
 has no HTTP response.
+
+### Validating documents without executing them
+
+`SchemaValidator` checks a document against a schema and never executes it. Building one costs a
+single introspection round trip, so build it once and reuse it; it holds no mutable state and is
+safe to share between goroutines.
+
+```go
+// All you have is the endpoint's URL:
+v, err := gqlcli.NewSchemaValidatorFromURL(ctx, "https://api.example.com/graphql")
+
+// ...or the endpoint needs auth, a timeout, custom headers:
+v, err := gqlcli.NewSchemaValidatorFromConfig(ctx, &gqlcli.Config{
+    URL:   "https://api.example.com/graphql",
+    Token: os.Getenv("API_TOKEN"),
+})
+
+result := v.Validate(`{ users { nope } }`)
+if !result.Valid {
+    for _, e := range result.Errors {
+        fmt.Printf("%d:%d: %s (%s)\n", e.Line, e.Column, e.Message, e.Rule)
+    }
+}
+```
+
+Other constructors, for when you already have the schema in some form:
+
+| Constructor | Source |
+|-------------|--------|
+| `NewSchemaValidator(*ast.Schema)` | An already-parsed schema — pass `InlineExecutor.Schema()` to skip introspection entirely |
+| `NewSchemaValidatorFromSDL(sdl)` | SDL text: a `.graphql` file, or a saved `SDL()` result |
+| `NewSchemaValidatorFromIntrospection(map)` | An introspection result you fetched yourself |
+| `NewSchemaValidatorFromClient(ctx, Client)` | Any `Client` — works over HTTP and inline alike |
+
+`SDL()` returns the SDL the validator was built from, so a program can introspect once, persist
+the result, and rebuild later with no network access:
+
+```go
+online, _ := gqlcli.NewSchemaValidatorFromURL(ctx, endpoint)
+os.WriteFile("schema.graphql", []byte(online.SDL()), 0644)
+
+// later, offline:
+sdl, _ := os.ReadFile("schema.graphql")
+offline, _ := gqlcli.NewSchemaValidatorFromSDL(string(sdl))
+```
+
+The introspection-to-SDL conversion is available on its own as `SchemaSDL(introspection)` and
+`SchemaFromIntrospection(introspection)`.
+
+Variable *values* are not part of the document and are not checked: a document declaring
+required variables validates on its own.
 
 ### Bounding captured output
 

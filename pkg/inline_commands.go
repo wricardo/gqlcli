@@ -76,6 +76,7 @@ func (cs *InlineCommandSet) Commands() []*cli.Command {
 	cmds := []*cli.Command{
 		cs.queryCommand(),
 		cs.mutationCommand(),
+		cs.validateCommand(),
 		cs.batchCommand(),
 		cs.describeCommand(),
 		cs.typesCommand(),
@@ -401,9 +402,14 @@ func printInlineResult(c *cli.Context, raw json.RawMessage) error {
 		return nil
 	}
 
-	format := c.String("format")
+	return printInlineValue(c, result)
+}
+
+// printInlineValue renders a map through the formatter named by --format,
+// honoring --output.
+func printInlineValue(c *cli.Context, result map[string]interface{}) error {
 	reg := NewFormatterRegistry()
-	formatter, err := reg.Get(format)
+	formatter, err := reg.Get(c.String("format"))
 	if err != nil {
 		formatter, _ = reg.Get("json")
 	}

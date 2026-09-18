@@ -46,18 +46,24 @@ TYPICAL AI WORKFLOW
        gqlcli describe User                   # SDL definition of a specific type
        gqlcli describe User --args            # include field argument signatures
 
-  3. Execute operations:
+  3. Check an operation before running it (nothing is executed):
+       gqlcli validate '{ users { id name } }'        # exits 1 and reports line:column on error
+       gqlcli query --validate-only '{ users { id } }'
+       gqlcli sdl > schema.graphql                    # then validate offline, no network or auth:
+       gqlcli validate --schema-file schema.graphql '{ users { id } }'
+
+  4. Execute operations:
        gqlcli query '{ users { id name } }'
        gqlcli mutation 'mutation { deleteUser(id:"1") { ok } }'
        gqlcli mutation 'mutation CreateUser($input: CreateUserInput!) { createUser(input: $input) { id } }' \
          --input '{"name":"Alice","email":"alice@example.com"}'
        gqlcli subscribe 'subscription { messageAdded { id text } }'
 
-  4. Filter output with jq (use --format json first):
+  5. Filter output with jq (use --format json first):
        gqlcli query '{ users { id name } }' --format json | jq '.data.users[].name'
        gqlcli query '{ users { id name } }' --format json | jq '.data.users | length'
 
-  5. Batch multiple operations in one request:
+  6. Batch multiple operations in one request:
        # NDJSON from stdin (default transport, one response line per operation)
        printf '{"query":"{ users { id } }"}\n{"query":"{ posts { id } }"}\n' | gqlcli batch
 
@@ -73,7 +79,7 @@ TYPICAL AI WORKFLOW
        # JSON array transport (single POST, returns a JSON array)
        gqlcli batch --array --file operations.json
 
-  6. Script complex workflows with JavaScript (async/await + concurrency):
+  7. Script complex workflows with JavaScript (async/await + concurrency):
        gqlcli script --file ./disableUsers.js
        gqlcli script --file ./disableUsers.js --arg '{"tenantId":"acme"}'
        gqlcli script --op disable-inactive-users

@@ -9,6 +9,7 @@ import (
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/handler"
+	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/gqlerror"
 )
 
@@ -16,6 +17,7 @@ import (
 // Create one with NewInlineExecutor; use Execute to run operations.
 type InlineExecutor struct {
 	srv    *handler.Server
+	schema graphql.ExecutableSchema
 	enrich func(context.Context) context.Context
 }
 
@@ -56,7 +58,17 @@ func NewInlineExecutor(schema graphql.ExecutableSchema, opts ...Option) *InlineE
 		srv.SetErrorPresenter(makeSchemaHintPresenter(d))
 	}
 
-	return &InlineExecutor{srv: srv, enrich: cfg.enrich}
+	return &InlineExecutor{srv: srv, schema: schema, enrich: cfg.enrich}
+}
+
+// Schema returns the parsed schema behind this executor, or nil if there is
+// none. An inline caller can hand it to NewSchemaValidator to validate
+// documents without an introspection round trip.
+func (e *InlineExecutor) Schema() *ast.Schema {
+	if e == nil || e.schema == nil {
+		return nil
+	}
+	return e.schema.Schema()
 }
 
 // Execute runs a GraphQL query or mutation and returns the raw JSON response.

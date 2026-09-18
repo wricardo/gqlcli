@@ -45,6 +45,8 @@ func TestHTTPBackedCommandsExposeInsecureFlag(t *testing.T) {
 		builder.GetQueryCommand(),
 		builder.GetMutationCommand(),
 		builder.GetSubscribeCommand(),
+		builder.GetValidateCommand(),
+		builder.GetSdlCommand(),
 		builder.GetBatchCommand(),
 		builder.GetTypesCommand(),
 		builder.GetDescribeCommand(),

@@ -158,6 +158,10 @@ func (b *CLIBuilder) GetQueryCommand() *cli.Command {
 				return err
 			}
 
+			if c.Bool("validate-only") {
+				return b.validateDocument(c, query)
+			}
+
 			// Parse variables
 			variables, err := b.getVariables(c)
 			if err != nil {
@@ -224,6 +228,10 @@ func (b *CLIBuilder) GetMutationCommand() *cli.Command {
 				return err
 			}
 
+			if c.Bool("validate-only") {
+				return b.validateDocument(c, mutation)
+			}
+
 			// Parse variables
 			variables, err := b.getVariables(c)
 			if err != nil {
@@ -288,6 +296,10 @@ func (b *CLIBuilder) GetSubscribeCommand() *cli.Command {
 			subscription, err := b.getSubscriptionString(c)
 			if err != nil {
 				return err
+			}
+
+			if c.Bool("validate-only") {
+				return b.validateDocument(c, subscription)
 			}
 
 			variables, err := b.getVariables(c)
@@ -813,6 +825,8 @@ func (b *CLIBuilder) RegisterCommands(app *cli.App) {
 		b.GetQueryCommand(),
 		b.GetMutationCommand(),
 		b.GetSubscribeCommand(),
+		b.GetValidateCommand(),
+		b.GetSdlCommand(),
 		b.GetBatchCommand(),
 		b.GetTypesCommand(),
 		b.GetDescribeCommand(),
@@ -961,6 +975,10 @@ func (b *CLIBuilder) getOperationFlags() []cli.Flag {
 			Usage: "Named operation from .gqlcli.json (provides query/mutation string + default variables)",
 		},
 		headerFlag(),
+		&cli.BoolFlag{
+			Name:  "validate-only",
+			Usage: "Check the document against the schema and exit without running it (see the validate command)",
+		},
 	}
 }
 

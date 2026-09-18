@@ -139,6 +139,35 @@ gqlcli mutation \
   --variables '{"input":{"name":"Alice"}}'
 ```
 
+## Validate without executing
+
+Check a document against the schema before running it. Nothing is sent to the server — only the schema is introspected, so no resolver runs and no data changes. Exits 0 when valid, 1 when not, with `line:column: message` per problem.
+
+```bash
+gqlcli validate '{ users { id name } }'
+gqlcli validate --query-file ./getUser.graphql
+gqlcli validate --mutation 'mutation { deleteUser(id:"1") { ok } }'
+
+# machine-readable: {"valid":false,"errors":[{"line":1,"column":8,"message":...,"rule":...}]}
+gqlcli validate '{ users { nope } }' --format json
+gqlcli validate '{ users { nope } }' --jq '.errors[].message'
+
+# same check from the operation commands, which stop before sending
+gqlcli query --validate-only '{ users { id } }'
+gqlcli mutation --validate-only 'mutation { ... }'
+```
+
+Validate offline — no network, no credentials — by dumping the schema once with `sdl`:
+
+```bash
+gqlcli sdl > schema.graphql
+gqlcli validate --schema-file schema.graphql '{ users { id } }'
+```
+
+`sdl` prints the whole schema as a loadable SDL document (builtin scalars and directives omitted, since every parser supplies them). Use `describe` instead when you just want to read a few types.
+
+Variable *values* are not part of the document and are not checked: a document declaring required variables validates on its own.
+
 ## Script imperative workflows (JavaScript)
 
 Use `script` when you need loops/branching and multiple GraphQL calls in one flow (instead of `jq` + shell loops).
@@ -377,7 +406,7 @@ gqlcli query '{ viewer { id } }' --dump-headers headers.txt -f json
 gqlcli query '{ viewer { id } }' --metadata status-code --metadata header:X-Request-Id
 ```
 
-`--header/-H`, `--timeout`, `--retry`, `--retry-delay`, `--strict` (default true), and `--insecure` apply to HTTP-backed commands (`query`, `mutation`, `subscribe`, `batch`, `script`, `queries`, `mutations`, `types`, `describe`).
+`--header/-H`, `--timeout`, `--retry`, `--retry-delay`, `--strict` (default true), and `--insecure` apply to HTTP-backed commands (`query`, `mutation`, `subscribe`, `validate`, `sdl`, `batch`, `script`, `queries`, `mutations`, `types`, `describe`).
 
 Metadata flags (`--include-headers`, `--dump-headers`, `--metadata`) apply to operation commands that return a single response envelope (`query`, `mutation`, `subscribe`), not schema listing commands (`queries`, `mutations`, `types`, `describe`).
 
