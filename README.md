@@ -568,7 +568,7 @@ gqlcli types --output types.json
 --include-headers, -i        Include response status line and headers before body
 --dump-headers FILE          Write response status line and headers to file
 --metadata SELECTOR          Print selected metadata (status, status-code, headers, header:Name)
---timeout SECONDS            Request timeout (default: 30)
+--timeout SECONDS            Request timeout; 0 disables the timeout (default)
 --retry N                    Retry transient failures
 --retry-delay DURATION       Delay between retries (e.g. 500ms, 2s)
 --strict     Exit non-zero when response.errors is present (default: true; use --strict=false to disable)
@@ -593,7 +593,7 @@ gqlcli types --output types.json
 --include-headers, -i        Include response status line and headers before body
 --dump-headers FILE          Write response status line and headers to file
 --metadata SELECTOR          Print selected metadata (status, status-code, headers, header:Name)
---timeout SECONDS            Request timeout (default: 30)
+--timeout SECONDS            Request timeout; 0 disables the timeout (default)
 --retry N                    Retry transient failures
 --retry-delay DURATION       Delay between retries (e.g. 500ms, 2s)
 --strict     Exit non-zero when response.errors is present (default: true; use --strict=false to disable)
@@ -612,7 +612,7 @@ gqlcli types --output types.json
 -o, --operation STRING       Named operation to execute from a multi-operation document
 --op NAME                    Saved subscription from .gqlcli.json (type: "subscription")
 -H, --header KEY=VALUE       Per-request HTTP/WebSocket header (repeatable)
---timeout SECONDS            Connection/read timeout (default: 30)
+--timeout SECONDS            Connection/read timeout; 0 disables the timeout (default)
 --insecure                   Skip TLS certificate verification for wss:// endpoints
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL); http(s) maps to ws(s)
 --env VALUE                  Environment from .gqlcli.json
@@ -694,7 +694,7 @@ Saved scripts live inline under `.gqlcli.json` `scripts` and run with `gqlcli sc
 --file PATH                  Read operations from file instead of stdin
 --jq EXPR                    Apply jq expression to each response (client-side)
 -H, --header KEY=VALUE       Per-request HTTP header (repeatable)
---timeout SECONDS            Request timeout (default: 30)
+--timeout SECONDS            Request timeout; 0 disables the timeout (default)
 --retry N                    Retry transient failures
 --retry-delay DURATION       Delay between retries
 --strict     Exit non-zero when any response.errors is present (default: true; use --strict=false to disable)
@@ -937,7 +937,6 @@ func main() {
 	cfg := &gqlcli.Config{
 		URL:     "http://localhost:8080/graphql",
 		Format:  "toon",
-		Timeout: 30,
 	}
 
 	builder := gqlcli.NewCLIBuilder(cfg)
@@ -962,7 +961,7 @@ inside your own Go program. This matters when the script text is not written by 
 for example when an AI agent authors it and your program runs it.
 
 ```go
-client := gqlcli.NewHTTPClient(&gqlcli.Config{URL: endpoint, Timeout: 30})
+client := gqlcli.NewHTTPClient(&gqlcli.Config{URL: endpoint})
 
 var logs bytes.Buffer
 runner := gqlcli.NewScriptRunner(client,

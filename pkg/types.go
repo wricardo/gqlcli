@@ -17,7 +17,7 @@ type Config struct {
 	Auth  AuthConfig
 
 	// HTTP client settings
-	Timeout    int               // Request timeout in seconds (default: 30)
+	Timeout    int               // Request timeout in seconds; 0 disables the timeout (default)
 	RetryCount int               // Number of retries for transient request failures (default: 0)
 	RetryDelay time.Duration     // Delay between retries (default: 1s when retries are enabled)
 	Strict     bool              // Return an error when response.errors is present

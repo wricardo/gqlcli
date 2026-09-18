@@ -223,7 +223,7 @@ gqlcli script --op disable-inactive-users --arg '{"concurrency":10}'
 the script text is not human-written (e.g. authored by an AI agent):
 
 ```go
-client := gqlcli.NewHTTPClient(&gqlcli.Config{URL: endpoint, Timeout: 30})
+client := gqlcli.NewHTTPClient(&gqlcli.Config{URL: endpoint})
 runner := gqlcli.NewScriptRunner(client,
     gqlcli.WithStdout(&logs), gqlcli.WithStderr(&logs), // keep console.log off your stdout
     gqlcli.WithTimeout(30*time.Second),                 // interrupts `while(true){}`

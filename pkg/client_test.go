@@ -40,6 +40,13 @@ func TestTimeoutFlagPropagatesToConfigAndHTTPClient(t *testing.T) {
 	}
 }
 
+func TestHTTPClientDefaultHasNoTimeout(t *testing.T) {
+	client := NewHTTPClient(&Config{})
+	if got := client.client.GetClient().Timeout; got != 0 {
+		t.Fatalf("default timeout = %v, want no timeout", got)
+	}
+}
+
 func TestHTTPClientRetriesTransientFailures(t *testing.T) {
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

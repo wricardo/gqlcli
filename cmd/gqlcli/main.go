@@ -21,10 +21,9 @@ func cliVersion() string {
 
 func main() {
 	cfg := &gqlcli.Config{
-		URL:     "http://localhost:8080/graphql",
-		Format:  "toon",
-		Timeout: 30,
-		Strict:  true,
+		URL:    "http://localhost:8080/graphql",
+		Format: "toon",
+		Strict: true,
 	}
 
 	builder := gqlcli.NewCLIBuilder(cfg)

@@ -371,7 +371,7 @@ func TestQueryCommand_RetryFlagAfterPositional_EndToEnd(t *testing.T) {
 // TestQueryCommand_TimeoutFlagAfterPositional_EndToEnd proves --timeout
 // placed after the query string is actually applied to the request, by
 // using a timeout shorter than the server's response delay and expecting
-// the request to fail rather than hang for the default 30s.
+// the request to fail rather than wait without a deadline.
 func TestQueryCommand_TimeoutFlagAfterPositional_EndToEnd(t *testing.T) {
 	release := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

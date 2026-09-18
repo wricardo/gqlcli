@@ -154,7 +154,7 @@ func (b *CLIBuilder) embedIndexCommand() *cli.Command {
 			Value:   b.config.Debug,
 		},
 		insecureFlag(),
-		&cli.IntFlag{Name: "timeout", Usage: "Request timeout in seconds (default: 30)", Value: b.config.Timeout},
+		&cli.IntFlag{Name: "timeout", Usage: "Request timeout in seconds; 0 disables the timeout (default)", Value: b.config.Timeout},
 		&cli.IntFlag{Name: "retry", Usage: "Retry count for transient failures", Value: b.config.RetryCount},
 		&cli.DurationFlag{Name: "retry-delay", Usage: "Delay between retries (e.g. 500ms, 2s)", Value: b.config.RetryDelay},
 		&cli.BoolFlag{Name: "strict", Usage: "Exit non-zero when response.errors is present", Value: b.config.Strict},

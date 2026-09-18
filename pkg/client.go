@@ -198,9 +198,6 @@ func (c *HTTPClient) getDescriber() *Describer {
 // NewHTTPClient creates a new HTTP GraphQL client
 func NewHTTPClient(cfg *Config) *HTTPClient {
 	timeout := time.Duration(cfg.Timeout) * time.Second
-	if cfg.Timeout == 0 {
-		timeout = 30 * time.Second
-	}
 
 	restClient := resty.New().SetTimeout(timeout)
 	if cfg.RetryCount > 0 {
