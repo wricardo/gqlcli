@@ -359,6 +359,9 @@ printf '{"query":"{ users { id name } }"}\n' \
 # From a file
 gqlcli batch --file operations.ndjson
 
+# Split a large input into sequential requests of ten operations each
+gqlcli batch --batch-size 10 --file operations.ndjson
+
 # Pipeline: query -> filter -> feed into mutations
 gqlcli query -q '{ users { id status } }' -f json \
   | jq -c '.data.users[] | select(.status == "inactive") | {query: "mutation($id:ID!){archive(id:$id){ok}}", variables: {id: .id}}' \
@@ -687,6 +690,7 @@ Saved scripts live inline under `.gqlcli.json` `scripts` and run with `gqlcli sc
 ```
 --ndjson                     Use NDJSON transport (default)
 --array                      Use JSON array batch transport
+--batch-size N               Maximum operations per HTTP request; 0 sends all operations in one request (default)
 --file PATH                  Read operations from file instead of stdin
 --jq EXPR                    Apply jq expression to each response (client-side)
 -H, --header KEY=VALUE       Per-request HTTP header (repeatable)

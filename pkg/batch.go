@@ -199,6 +199,10 @@ func (b *CLIBuilder) GetBatchCommand() *cli.Command {
 				Name:  "array",
 				Usage: "Use JSON array batch transport",
 			},
+			&cli.IntFlag{
+				Name:  "batch-size",
+				Usage: "Maximum operations per HTTP request; 0 sends all operations in one request (default)",
+			},
 			&cli.StringFlag{
 				Name:  "file",
 				Usage: "Read operations from file instead of stdin",
@@ -239,16 +243,20 @@ func (b *CLIBuilder) GetBatchCommand() *cli.Command {
 
 			useArray := c.Bool("array")
 			clientJQ := c.String("jq")
+			batchSize := c.Int("batch-size")
+			if batchSize < 0 {
+				return fmt.Errorf("--batch-size must be zero or greater")
+			}
 
 			if useArray {
-				return executeBatchArray(c, httpClient, input, clientJQ)
+				return executeBatchArray(c, httpClient, input, clientJQ, batchSize)
 			}
-			return executeBatchNDJSON(c, httpClient, input, clientJQ)
+			return executeBatchNDJSON(c, httpClient, input, clientJQ, batchSize)
 		},
 	}
 }
 
-func executeBatchNDJSON(c *cli.Context, client *HTTPClient, input io.Reader, clientJQ string) error {
+func executeBatchNDJSON(c *cli.Context, client *HTTPClient, input io.Reader, clientJQ string, batchSize int) error {
 	// Read all lines into batch requests
 	var requests []BatchRequest
 	scanner := bufio.NewScanner(input)
@@ -272,15 +280,14 @@ func executeBatchNDJSON(c *cli.Context, client *HTTPClient, input io.Reader, cli
 		return nil
 	}
 
-	results, err := client.executeNDJSON(context.Background(), requests)
-	if err != nil {
-		return err
-	}
-
-	return outputBatchResults(results, requests, clientJQ, c.Bool("strict"))
+	return executeBatchChunks(requests, batchSize, func(chunk []BatchRequest) ([]json.RawMessage, error) {
+		return client.executeNDJSON(context.Background(), chunk)
+	}, func(results []json.RawMessage, chunk []BatchRequest) error {
+		return outputBatchResults(results, chunk, clientJQ, c.Bool("strict"))
+	})
 }
 
-func executeBatchArray(c *cli.Context, client *HTTPClient, input io.Reader, clientJQ string) error {
+func executeBatchArray(c *cli.Context, client *HTTPClient, input io.Reader, clientJQ string, batchSize int) error {
 	data, err := io.ReadAll(input)
 	if err != nil {
 		return fmt.Errorf("failed to read input: %w", err)
@@ -316,12 +323,35 @@ func executeBatchArray(c *cli.Context, client *HTTPClient, input io.Reader, clie
 		return nil
 	}
 
-	results, err := client.executeBatchHTTP(context.Background(), requests)
-	if err != nil {
-		return err
+	return executeBatchChunks(requests, batchSize, func(chunk []BatchRequest) ([]json.RawMessage, error) {
+		return client.executeBatchHTTP(context.Background(), chunk)
+	}, func(results []json.RawMessage, chunk []BatchRequest) error {
+		return outputBatchResults(results, chunk, clientJQ, c.Bool("strict"))
+	})
+}
+
+// executeBatchChunks sends each chunk in order. A batch size of zero preserves
+// the original behavior of sending every operation in one HTTP request.
+func executeBatchChunks(requests []BatchRequest, batchSize int, execute func([]BatchRequest) ([]json.RawMessage, error), output func([]json.RawMessage, []BatchRequest) error) error {
+	if batchSize == 0 || batchSize > len(requests) {
+		batchSize = len(requests)
 	}
 
-	return outputBatchResults(results, requests, clientJQ, c.Bool("strict"))
+	for start := 0; start < len(requests); start += batchSize {
+		end := start + batchSize
+		if end > len(requests) {
+			end = len(requests)
+		}
+		chunk := requests[start:end]
+		results, err := execute(chunk)
+		if err != nil {
+			return err
+		}
+		if err := output(results, chunk); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // outputBatchResults applies client-side jq (if any) and prints results
