@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/99designs/gqlgen v0.17.87
+	github.com/dop251/goja v0.0.0-20260911104922-fabc3b8078ad
 	github.com/go-resty/resty/v2 v2.11.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/gorilla/websocket v1.5.0
@@ -17,7 +18,6 @@ require (
 	github.com/agnivade/levenshtein v1.2.1 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.4 // indirect
 	github.com/dlclark/regexp2/v2 v2.5.2 // indirect
-	github.com/dop251/goja v0.0.0-20260911104922-fabc3b8078ad // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
