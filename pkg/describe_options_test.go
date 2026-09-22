@@ -54,10 +54,10 @@ func newFakeDescriber() (*Describer, *fakeIntrospector) {
 		"Query": `{
 			"name":"Query","kind":"OBJECT",
 			"fields":[
-				{"name":"smsCampaign","type":{"kind":"OBJECT","name":"SmsCampaign"},"args":[{"name":"id","type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"ID"}}}]},
-				{"name":"smsCampaignBySlug","type":{"kind":"OBJECT","name":"SmsCampaign"},"args":[{"name":"slug","type":{"kind":"SCALAR","name":"String"}}]},
-				{"name":"smsCampaignPreview","type":{"kind":"OBJECT","name":"SmsCampaign"},"args":[]},
 				{"name":"smsCampaigns","type":{"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"SmsCampaignList"}},"args":[{"name":"limit","type":{"kind":"SCALAR","name":"Int"}}]},
+				{"name":"smsCampaignPreview","type":{"kind":"OBJECT","name":"SmsCampaign"},"args":[]},
+				{"name":"smsCampaignBySlug","type":{"kind":"OBJECT","name":"SmsCampaign"},"args":[{"name":"slug","type":{"kind":"SCALAR","name":"String"}}]},
+				{"name":"smsCampaign","type":{"kind":"OBJECT","name":"SmsCampaign"},"args":[{"name":"id","type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"ID"}}}]},
 				{"name":"emailCampaigns","type":{"kind":"OBJECT","name":"EmailList"},"args":[]},
 				{"name":"users","type":{"kind":"OBJECT","name":"UserList"},"args":[]}
 			]
@@ -65,6 +65,7 @@ func newFakeDescriber() (*Describer, *fakeIntrospector) {
 		"Mutation": `{
 			"name":"Mutation","kind":"OBJECT",
 			"fields":[
+				{"name":"syncSmsCampaigns","type":{"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"SmsCampaignJob"}},"args":[]},
 				{"name":"createSmsCampaign","type":{"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"SmsCampaign"}},"args":[{"name":"input","type":{"kind":"NON_NULL","ofType":{"kind":"INPUT_OBJECT","name":"CreateSmsCampaignInput"}}}]},
 				{"name":"duplicateSmsCampaign","type":{"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"SmsCampaign"}},"args":[{"name":"id","type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"ID"}}}]},
 				{"name":"archiveUser","type":{"kind":"SCALAR","name":"Boolean"},"args":[{"name":"id","type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"ID"}}}]}
@@ -82,6 +83,12 @@ func newFakeDescriber() (*Describer, *fakeIntrospector) {
 			"fields":[
 				{"name":"campaigns","type":{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":{"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"SmsCampaign"}}}},"args":[]},
 				{"name":"total","type":{"kind":"SCALAR","name":"Int"},"args":[]}
+			]
+		}`,
+		"SmsCampaignJob": `{
+			"name":"SmsCampaignJob","kind":"OBJECT",
+			"fields":[
+				{"name":"campaign","type":{"kind":"OBJECT","name":"SmsCampaign"},"args":[]}
 			]
 		}`,
 		"EmailList": `{
@@ -325,8 +332,14 @@ func TestDescribeWithDepth_IncludesReferencingOperations(t *testing.T) {
 	if !strings.Contains(sdl, "smsCampaigns(limit: Int): SmsCampaignList!") {
 		t.Errorf("SDL = %q, want transitive query reference through SmsCampaignList", sdl)
 	}
+	if strings.Index(sdl, "smsCampaign(id: ID!): SmsCampaign") > strings.Index(sdl, "smsCampaigns(limit: Int): SmsCampaignList!") {
+		t.Errorf("SDL = %q, want direct query return matches ranked ahead of transitive wrapper matches", sdl)
+	}
 	if !strings.Contains(sdl, "createSmsCampaign(input: CreateSmsCampaignInput!): SmsCampaign!") {
 		t.Errorf("SDL = %q, want mutation reference", sdl)
+	}
+	if strings.Index(sdl, "createSmsCampaign(input: CreateSmsCampaignInput!): SmsCampaign!") > strings.Index(sdl, "syncSmsCampaigns: SmsCampaignJob!") {
+		t.Errorf("SDL = %q, want direct mutation return matches ranked ahead of transitive wrapper matches", sdl)
 	}
 	if strings.Contains(sdl, "archiveUser") {
 		t.Errorf("SDL = %q, did not want unrelated operations", sdl)
@@ -402,10 +415,10 @@ func TestDescribeWithDepth_DefaultReverseReferenceCaps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DescribeWithDepth: %v", err)
 	}
-	if !strings.Contains(sdl, "# Referenced by top-level operations (showing 5 of 6)") {
+	if !strings.Contains(sdl, "# Referenced by top-level operations (showing 5 of 7)") {
 		t.Errorf("SDL = %q, want capped operations header", sdl)
 	}
-	if !strings.Contains(sdl, "# Referenced by fields (showing 5 of 9)") {
+	if !strings.Contains(sdl, "# Referenced by fields (showing 5 of 10)") {
 		t.Errorf("SDL = %q, want capped fields header", sdl)
 	}
 	for _, want := range []string{
@@ -426,6 +439,7 @@ func TestDescribeWithDepth_DefaultReverseReferenceCaps(t *testing.T) {
 	}
 	for _, unwanted := range []string{
 		"duplicateSmsCampaign(id: ID!): SmsCampaign!",
+		"syncSmsCampaigns: SmsCampaignJob!",
 		"type PhoneCallCampaign {",
 		"type Team {",
 		"type Workspace {",
@@ -448,6 +462,7 @@ func TestDescribeWithDepth_ZeroCapsMeanUnlimited(t *testing.T) {
 	}
 	for _, want := range []string{
 		"duplicateSmsCampaign(id: ID!): SmsCampaign!",
+		"syncSmsCampaigns: SmsCampaignJob!",
 		"type PhoneCallCampaign {",
 		"type Team {",
 		"type Workspace {",

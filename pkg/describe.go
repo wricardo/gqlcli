@@ -411,12 +411,12 @@ func (d *Describer) appendReferencingOperations(ctx context.Context, out *string
 			return err
 		}
 		fields, _ := root["fields"].([]interface{})
-		matching, err := d.filterOperationFieldsByReferencedType(ctx, fields, typeName, depth)
+		matching, err := d.rankOperationFieldsByReferencedType(ctx, fields, typeName, depth)
 		if err != nil {
 			return err
 		}
 		totalMatches += len(matching)
-		matching = limitInterfaces(matching, remaining)
+		matching = limitOperationMatches(matching, remaining)
 		if len(matching) == 0 {
 			continue
 		}
@@ -424,10 +424,15 @@ func (d *Describer) appendReferencingOperations(ctx context.Context, out *string
 		if remaining > 0 {
 			remaining -= len(matching)
 		}
+		orderedFields := make([]interface{}, 0, len(matching))
+		for _, match := range matching {
+			orderedFields = append(orderedFields, match.field)
+		}
 		sections = append(sections, FormatTypeSDL(map[string]interface{}{
-			"name":   root["name"],
-			"kind":   root["kind"],
-			"fields": matching,
+			"name":                root["name"],
+			"kind":                root["kind"],
+			"fields":              orderedFields,
+			"_preserveFieldOrder": true,
 		}, true, !showDescriptions))
 		if remaining == 0 && maxRefs > 0 {
 			break
@@ -534,6 +539,51 @@ func limitInterfaces(items []interface{}, max int) []interface{} {
 	return items[:max]
 }
 
+type operationFieldMatch struct {
+	field map[string]interface{}
+	score operationMatchScore
+}
+
+type operationMatchScore struct {
+	locationRank int
+	depth        int
+	name         string
+}
+
+func limitOperationMatches(items []operationFieldMatch, max int) []operationFieldMatch {
+	if max <= 0 || len(items) <= max {
+		return items
+	}
+	return items[:max]
+}
+
+func (d *Describer) rankOperationFieldsByReferencedType(ctx context.Context, fields []interface{}, targetType string, depth int) ([]operationFieldMatch, error) {
+	matched := make([]operationFieldMatch, 0, len(fields))
+	for _, field := range fields {
+		fm, ok := field.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		score, usesType, err := d.operationFieldMatchScore(ctx, fm, targetType, depth)
+		if err != nil {
+			return nil, err
+		}
+		if usesType {
+			matched = append(matched, operationFieldMatch{field: fm, score: score})
+		}
+	}
+	sort.Slice(matched, func(i, j int) bool {
+		if matched[i].score.locationRank != matched[j].score.locationRank {
+			return matched[i].score.locationRank < matched[j].score.locationRank
+		}
+		if matched[i].score.depth != matched[j].score.depth {
+			return matched[i].score.depth < matched[j].score.depth
+		}
+		return matched[i].score.name < matched[j].score.name
+	})
+	return matched, nil
+}
+
 func (d *Describer) filterOperationFieldsByReferencedType(ctx context.Context, fields []interface{}, targetType string, depth int) ([]interface{}, error) {
 	matched := make([]interface{}, 0, len(fields))
 	for _, field := range fields {
@@ -552,61 +602,92 @@ func (d *Describer) filterOperationFieldsByReferencedType(ctx context.Context, f
 	return matched, nil
 }
 
-func (d *Describer) fieldUsesReferencedType(ctx context.Context, field map[string]interface{}, targetType string, depth int) (bool, error) {
-	if ok, err := d.typeRefContainsTarget(ctx, field["type"], targetType, depth, map[string]int{}); ok || err != nil {
-		return ok, err
-	}
+func (d *Describer) operationFieldMatchScore(ctx context.Context, field map[string]interface{}, targetType string, depth int) (operationMatchScore, bool, error) {
+	name, _ := field["name"].(string)
+	bestArgDepth := -1
 	if args, ok := field["args"].([]interface{}); ok {
 		for _, arg := range args {
 			am, ok := arg.(map[string]interface{})
 			if !ok {
 				continue
 			}
-			if ok, err := d.typeRefContainsTarget(ctx, am["type"], targetType, depth, map[string]int{}); ok || err != nil {
-				return ok, err
+			argDepth, ok, err := d.typeRefMatchDepth(ctx, am["type"], targetType, depth)
+			if err != nil {
+				return operationMatchScore{}, false, err
+			}
+			if ok && (bestArgDepth == -1 || argDepth < bestArgDepth) {
+				bestArgDepth = argDepth
 			}
 		}
 	}
-	return false, nil
+	if bestArgDepth >= 0 {
+		return operationMatchScore{locationRank: 0, depth: bestArgDepth, name: name}, true, nil
+	}
+	returnDepth, ok, err := d.typeRefMatchDepth(ctx, field["type"], targetType, depth)
+	if err != nil {
+		return operationMatchScore{}, false, err
+	}
+	if ok {
+		return operationMatchScore{locationRank: 1, depth: returnDepth, name: name}, true, nil
+	}
+	return operationMatchScore{}, false, nil
 }
 
-func (d *Describer) typeRefContainsTarget(ctx context.Context, typeRef interface{}, targetType string, depth int, seen map[string]int) (bool, error) {
+func (d *Describer) fieldUsesReferencedType(ctx context.Context, field map[string]interface{}, targetType string, depth int) (bool, error) {
+	_, ok, err := d.operationFieldMatchScore(ctx, field, targetType, depth)
+	return ok, err
+}
+
+func (d *Describer) typeRefMatchDepth(ctx context.Context, typeRef interface{}, targetType string, depth int) (int, bool, error) {
 	typeName := baseTypeName(typeRef)
 	if typeName == "" {
-		return false, nil
+		return 0, false, nil
 	}
-	return d.typeContainsTarget(ctx, typeName, targetType, depth, seen)
+	return d.typeContainsTargetDepth(ctx, typeName, targetType, depth, map[string]int{})
 }
 
-func (d *Describer) typeContainsTarget(ctx context.Context, typeName, targetType string, depth int, seen map[string]int) (bool, error) {
+func (d *Describer) typeContainsTargetDepth(ctx context.Context, typeName, targetType string, depth int, seen map[string]int) (int, bool, error) {
 	if typeName == targetType {
-		return true, nil
+		return 0, true, nil
 	}
 	if depth == 0 || isBuiltInScalar(typeName) || strings.HasPrefix(typeName, "__") {
-		return false, nil
+		return 0, false, nil
 	}
 	if prev, ok := seen[typeName]; ok && prev >= depth {
-		return false, nil
+		return 0, false, nil
 	}
 	seen[typeName] = depth
 
 	typeInfo, err := d.fetch(ctx, typeName)
 	if err != nil {
-		return false, err
+		return 0, false, err
 	}
+	bestDepth := -1
 	for _, depName := range collectReferencedTypeNames(typeInfo) {
-		if depName == targetType {
-			return true, nil
-		}
-		ok, err := d.typeContainsTarget(ctx, depName, targetType, depth-1, seen)
+		depDepth, ok, err := d.typeContainsTargetDepth(ctx, depName, targetType, depth-1, cloneDepthSeen(seen))
 		if err != nil {
-			return false, err
+			return 0, false, err
 		}
-		if ok {
-			return true, nil
+		if !ok {
+			continue
+		}
+		candidate := depDepth + 1
+		if bestDepth == -1 || candidate < bestDepth {
+			bestDepth = candidate
 		}
 	}
-	return false, nil
+	if bestDepth >= 0 {
+		return bestDepth, true, nil
+	}
+	return 0, false, nil
+}
+
+func cloneDepthSeen(seen map[string]int) map[string]int {
+	out := make(map[string]int, len(seen))
+	for k, v := range seen {
+		out[k] = v
+	}
+	return out
 }
 
 func baseTypeName(typeData interface{}) string {
@@ -755,8 +836,13 @@ func FormatTypeSDL(typeData map[string]interface{}, showArgs, noDescriptions boo
 
 	fmt.Fprintf(&b, "%s %s {\n", sdlKeyword(kind), name)
 
+	preserveFieldOrder, _ := typeData["_preserveFieldOrder"].(bool)
+
 	printFields := func(fields []interface{}) {
 		sorted := sortFieldsByType(fields)
+		if preserveFieldOrder {
+			sorted = sortFieldsPreservingInputOrder(fields)
+		}
 		i := 0
 		for i < len(sorted) {
 			fm := sorted[i]
@@ -862,6 +948,16 @@ func sortFieldsByType(fields []interface{}) []map[string]interface{} {
 		nj, _ := out[j]["name"].(string)
 		return ni < nj
 	})
+	return out
+}
+
+func sortFieldsPreservingInputOrder(fields []interface{}) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(fields))
+	for _, f := range fields {
+		if fm, ok := f.(map[string]interface{}); ok {
+			out = append(out, fm)
+		}
+	}
 	return out
 }
 

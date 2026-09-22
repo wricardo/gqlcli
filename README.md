@@ -805,6 +805,7 @@ TYPE_NAME                    Name of the type to describe (required)
 --max-op-refs N              Max top-level operation references to append (default: 5, 0 = unlimited)
 --max-field-refs N           Max referencing schema types to append in the fields section (default: 5, 0 = unlimited)
                               Truncated reverse-reference headers show "(showing X of N)"
+                              Top-level Query/Mutation refs are ranked: arg matches first, then shallower return matches
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
 --env VALUE                  Environment from .gqlcli.json
 -d, --debug                  Enable debug logging

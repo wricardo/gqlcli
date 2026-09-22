@@ -68,6 +68,7 @@ Depth behavior for describe:
 - `--depth 0` only prints the requested type (default)
 - `--depth 1` includes directly referenced non-scalar types and appends top-level Query/Mutation fields plus non-root schema fields whose arg/return types reach the requested type within one hop
 - `--depth N` recursively expands non-scalar references up to N levels (including `UNION`/`INTERFACE` `possibleTypes`) and widens that reverse lookup to the same depth
+- Top-level Query/Mutation matches are ranked: arg matches first, then shallower return-type matches before deeper wrapper/pagination matches
 - Reverse-reference sections default to 5 top-level operation refs and 5 referencing schema types; pass `--max-op-refs 0 --max-field-refs 0` for no limit
 - When a reverse-reference section is capped, its header shows `(showing X of N)`
 
