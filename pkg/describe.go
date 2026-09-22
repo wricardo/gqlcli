@@ -19,8 +19,18 @@ import (
 // Use NewDescriber to create one from an InlineExecutor, or newSchemaHintDescriber
 // internally when wiring the schema hint error presenter.
 type Describer struct {
-	exec  func(ctx context.Context, query string, vars map[string]interface{}) (json.RawMessage, error)
-	cache sync.Map
+	exec       func(ctx context.Context, query string, vars map[string]interface{}) (json.RawMessage, error)
+	cache      sync.Map
+	schemaOnce sync.Once
+	schema     schemaIndex
+	schemaErr  error
+}
+
+type schemaIndex struct {
+	types            []interface{}
+	queryType        string
+	mutationType     string
+	subscriptionType string
 }
 
 // newSchemaHintDescriber creates a Describer backed by the given server.
@@ -203,9 +213,25 @@ func (d *Describer) DescribeWith(ctx context.Context, typeName string, showArgs,
 //   - 0: only the requested type
 //   - 1: requested type + directly referenced non-scalar types
 //   - N: recurse through non-scalar references N levels deep
+//
+// When depth >= 1, reverse-reference sections are also appended, capped at 5
+// top-level operation references and 5 referencing schema types by default.
 func (d *Describer) DescribeWithDepth(ctx context.Context, typeName string, showArgs, showDescriptions bool, depth int) (string, error) {
+	return d.DescribeWithDepthLimits(ctx, typeName, showArgs, showDescriptions, depth, 5, 5)
+}
+
+// DescribeWithDepthLimits is like DescribeWithDepth, but lets callers override
+// the caps for reverse-reference sections. maxOperationRefs and maxFieldRefs use
+// 0 to mean unlimited.
+func (d *Describer) DescribeWithDepthLimits(ctx context.Context, typeName string, showArgs, showDescriptions bool, depth, maxOperationRefs, maxFieldRefs int) (string, error) {
 	if depth < 0 {
 		depth = 0
+	}
+	if maxOperationRefs < 0 {
+		maxOperationRefs = 0
+	}
+	if maxFieldRefs < 0 {
+		maxFieldRefs = 0
 	}
 
 	root, err := d.fetch(ctx, typeName)
@@ -217,6 +243,14 @@ func (d *Describer) DescribeWithDepth(ctx context.Context, typeName string, show
 	seen := map[string]bool{}
 	if err := d.appendTypeSDLRecursive(ctx, &out, root, showArgs, showDescriptions, depth, seen); err != nil {
 		return "", err
+	}
+	if depth >= 1 {
+		if err := d.appendReferencingOperations(ctx, &out, typeName, showDescriptions, depth, maxOperationRefs); err != nil {
+			return "", err
+		}
+		if err := d.appendReferencingFields(ctx, &out, typeName, showDescriptions, depth, maxFieldRefs); err != nil {
+			return "", err
+		}
 	}
 	return out.String(), nil
 }
@@ -351,6 +385,230 @@ func collectReferencedTypeNames(typeData map[string]interface{}) []string {
 	return out
 }
 
+func (d *Describer) appendReferencingOperations(ctx context.Context, out *strings.Builder, typeName string, showDescriptions bool, depth, maxRefs int) error {
+	if strings.HasPrefix(typeName, "__") {
+		return nil
+	}
+
+	schema, err := d.schemaTypes(ctx)
+	if err != nil {
+		return err
+	}
+	if typeName == schema.queryType || typeName == schema.mutationType || typeName == schema.subscriptionType {
+		return nil
+	}
+
+	var sections []string
+	remaining := maxRefs
+	totalMatches := 0
+	shownMatches := 0
+	for _, rootName := range []string{schema.queryType, schema.mutationType} {
+		if rootName == "" {
+			continue
+		}
+		root, err := d.fetch(ctx, rootName)
+		if err != nil {
+			return err
+		}
+		fields, _ := root["fields"].([]interface{})
+		matching, err := d.filterOperationFieldsByReferencedType(ctx, fields, typeName, depth)
+		if err != nil {
+			return err
+		}
+		totalMatches += len(matching)
+		matching = limitInterfaces(matching, remaining)
+		if len(matching) == 0 {
+			continue
+		}
+		shownMatches += len(matching)
+		if remaining > 0 {
+			remaining -= len(matching)
+		}
+		sections = append(sections, FormatTypeSDL(map[string]interface{}{
+			"name":   root["name"],
+			"kind":   root["kind"],
+			"fields": matching,
+		}, true, !showDescriptions))
+		if remaining == 0 && maxRefs > 0 {
+			break
+		}
+	}
+
+	if len(sections) == 0 {
+		return nil
+	}
+
+	out.WriteString("\n# Referenced by top-level operations")
+	if totalMatches > shownMatches {
+		fmt.Fprintf(out, " (showing %d of %d)", shownMatches, totalMatches)
+	}
+	out.WriteString("\n")
+	for _, section := range sections {
+		out.WriteString(section)
+	}
+	return nil
+}
+
+func (d *Describer) appendReferencingFields(ctx context.Context, out *strings.Builder, typeName string, showDescriptions bool, depth, maxRefs int) error {
+	if strings.HasPrefix(typeName, "__") {
+		return nil
+	}
+
+	schema, err := d.schemaTypes(ctx)
+	if err != nil {
+		return err
+	}
+	rootNames := map[string]bool{}
+	for _, name := range []string{schema.queryType, schema.mutationType, schema.subscriptionType} {
+		if name != "" {
+			rootNames[name] = true
+		}
+	}
+
+	type namedSection struct {
+		name string
+		sdl  string
+	}
+	sections := make([]namedSection, 0)
+	totalMatches := 0
+	for _, raw := range schema.types {
+		tm, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := tm["name"].(string)
+		kind, _ := tm["kind"].(string)
+		if name == "" || strings.HasPrefix(name, "__") || rootNames[name] {
+			continue
+		}
+		if kind != "OBJECT" && kind != "INTERFACE" {
+			continue
+		}
+		fields, _ := tm["fields"].([]interface{})
+		if len(fields) == 0 {
+			continue
+		}
+		matching, err := d.filterOperationFieldsByReferencedType(ctx, fields, typeName, depth)
+		if err != nil {
+			return err
+		}
+		if len(matching) == 0 {
+			continue
+		}
+		totalMatches++
+		sections = append(sections, namedSection{
+			name: name,
+			sdl: FormatTypeSDL(map[string]interface{}{
+				"name":        name,
+				"kind":        kind,
+				"description": tm["description"],
+				"fields":      matching,
+			}, true, !showDescriptions),
+		})
+	}
+
+	if len(sections) == 0 {
+		return nil
+	}
+
+	sort.Slice(sections, func(i, j int) bool { return sections[i].name < sections[j].name })
+	if maxRefs > 0 && len(sections) > maxRefs {
+		sections = sections[:maxRefs]
+	}
+
+	out.WriteString("\n# Referenced by fields")
+	if totalMatches > len(sections) {
+		fmt.Fprintf(out, " (showing %d of %d)", len(sections), totalMatches)
+	}
+	out.WriteString("\n")
+	for _, section := range sections {
+		out.WriteString(section.sdl)
+	}
+	return nil
+}
+
+func limitInterfaces(items []interface{}, max int) []interface{} {
+	if max <= 0 || len(items) <= max {
+		return items
+	}
+	return items[:max]
+}
+
+func (d *Describer) filterOperationFieldsByReferencedType(ctx context.Context, fields []interface{}, targetType string, depth int) ([]interface{}, error) {
+	matched := make([]interface{}, 0, len(fields))
+	for _, field := range fields {
+		fm, ok := field.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		usesType, err := d.fieldUsesReferencedType(ctx, fm, targetType, depth)
+		if err != nil {
+			return nil, err
+		}
+		if usesType {
+			matched = append(matched, field)
+		}
+	}
+	return matched, nil
+}
+
+func (d *Describer) fieldUsesReferencedType(ctx context.Context, field map[string]interface{}, targetType string, depth int) (bool, error) {
+	if ok, err := d.typeRefContainsTarget(ctx, field["type"], targetType, depth, map[string]int{}); ok || err != nil {
+		return ok, err
+	}
+	if args, ok := field["args"].([]interface{}); ok {
+		for _, arg := range args {
+			am, ok := arg.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if ok, err := d.typeRefContainsTarget(ctx, am["type"], targetType, depth, map[string]int{}); ok || err != nil {
+				return ok, err
+			}
+		}
+	}
+	return false, nil
+}
+
+func (d *Describer) typeRefContainsTarget(ctx context.Context, typeRef interface{}, targetType string, depth int, seen map[string]int) (bool, error) {
+	typeName := baseTypeName(typeRef)
+	if typeName == "" {
+		return false, nil
+	}
+	return d.typeContainsTarget(ctx, typeName, targetType, depth, seen)
+}
+
+func (d *Describer) typeContainsTarget(ctx context.Context, typeName, targetType string, depth int, seen map[string]int) (bool, error) {
+	if typeName == targetType {
+		return true, nil
+	}
+	if depth == 0 || isBuiltInScalar(typeName) || strings.HasPrefix(typeName, "__") {
+		return false, nil
+	}
+	if prev, ok := seen[typeName]; ok && prev >= depth {
+		return false, nil
+	}
+	seen[typeName] = depth
+
+	typeInfo, err := d.fetch(ctx, typeName)
+	if err != nil {
+		return false, err
+	}
+	for _, depName := range collectReferencedTypeNames(typeInfo) {
+		if depName == targetType {
+			return true, nil
+		}
+		ok, err := d.typeContainsTarget(ctx, depName, targetType, depth-1, seen)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func baseTypeName(typeData interface{}) string {
 	tm, ok := typeData.(map[string]interface{})
 	if !ok {
@@ -373,6 +631,48 @@ func isBuiltInScalar(name string) bool {
 	default:
 		return false
 	}
+}
+
+func (d *Describer) schemaTypes(ctx context.Context) (schemaIndex, error) {
+	d.schemaOnce.Do(func() {
+		raw, err := d.exec(ctx, FullIntrospectionQuery, nil)
+		if err != nil {
+			d.schemaErr = fmt.Errorf("introspection failed: %w", err)
+			return
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			d.schemaErr = fmt.Errorf("failed to parse introspection response: %w", err)
+			return
+		}
+		data, ok := result["data"].(map[string]interface{})
+		if !ok {
+			d.schemaErr = fmt.Errorf("missing data in introspection response")
+			return
+		}
+		schema, ok := data["__schema"].(map[string]interface{})
+		if !ok {
+			d.schemaErr = fmt.Errorf("missing __schema in introspection response")
+			return
+		}
+		types, ok := schema["types"].([]interface{})
+		if !ok {
+			d.schemaErr = fmt.Errorf("missing types in introspection response")
+			return
+		}
+		d.schema.types = types
+		if qt, ok := schema["queryType"].(map[string]interface{}); ok {
+			d.schema.queryType, _ = qt["name"].(string)
+		}
+		if mt, ok := schema["mutationType"].(map[string]interface{}); ok {
+			d.schema.mutationType, _ = mt["name"].(string)
+		}
+		if st, ok := schema["subscriptionType"].(map[string]interface{}); ok {
+			d.schema.subscriptionType, _ = st["name"].(string)
+		}
+	})
+	return d.schema, d.schemaErr
 }
 
 // fetch retrieves and caches the raw introspection data for a type.

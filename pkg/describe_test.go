@@ -20,6 +20,16 @@ func TestDescribeWithDepthRecursesThroughPossibleTypes(t *testing.T) {
 	typeNamePattern := regexp.MustCompile(`__type\(name:\s*"([^"]+)"\)`)
 
 	typeData := map[string]map[string]interface{}{
+		"Query": {
+			"name":   "Query",
+			"kind":   "OBJECT",
+			"fields": []interface{}{},
+		},
+		"Mutation": {
+			"name":   "Mutation",
+			"kind":   "OBJECT",
+			"fields": []interface{}{},
+		},
 		"SearchResult": {
 			"name": "SearchResult",
 			"kind": "UNION",
@@ -54,6 +64,22 @@ func TestDescribeWithDepthRecursesThroughPossibleTypes(t *testing.T) {
 
 	d := &Describer{}
 	d.exec = func(_ context.Context, query string, _ map[string]interface{}) (json.RawMessage, error) {
+		if strings.Contains(query, "__schema") {
+			types := make([]interface{}, 0, len(typeData))
+			for _, t := range typeData {
+				types = append(types, t)
+			}
+			return json.Marshal(map[string]interface{}{
+				"data": map[string]interface{}{
+					"__schema": map[string]interface{}{
+						"queryType":    map[string]interface{}{"name": "Query"},
+						"mutationType": map[string]interface{}{"name": "Mutation"},
+						"types":        types,
+					},
+				},
+			})
+		}
+
 		matches := typeNamePattern.FindStringSubmatch(query)
 		if len(matches) != 2 {
 			return nil, fmt.Errorf("failed to parse type name from query: %s", query)

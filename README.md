@@ -58,6 +58,13 @@ gqlcli types
 # Inspect a specific type
 gqlcli describe User --args
 
+# Include related operations and schema fields too
+gqlcli describe SmsCampaign --depth 1
+
+# Remove reverse-reference caps (default is 5 of each)
+gqlcli describe SmsCampaign --depth 1 --max-op-refs 0 --max-field-refs 0
+# Truncated sections say "(showing X of N)"
+
 # Execute a mutation with variables
 gqlcli mutation \
   --mutation "mutation CreateUser(\$input: CreateUserInput!) { createUser(input: \$input) { id } }" \
@@ -794,7 +801,10 @@ Saved scripts live inline under `.gqlcli.json` `scripts` and run with `gqlcli sc
 TYPE_NAME                    Name of the type to describe (required)
 --args, -a                   Expand field argument signatures
 --desc                        Include field/type descriptions
---depth N                    Recursively include referenced non-scalar types (including UNION/INTERFACE possibleTypes)
+--depth N                    Recursively include referenced non-scalar types; when N >= 1 also append top-level Query/Mutation fields and non-root schema fields that reference the requested type within that depth
+--max-op-refs N              Max top-level operation references to append (default: 5, 0 = unlimited)
+--max-field-refs N           Max referencing schema types to append in the fields section (default: 5, 0 = unlimited)
+                              Truncated reverse-reference headers show "(showing X of N)"
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
 --env VALUE                  Environment from .gqlcli.json
 -d, --debug                  Enable debug logging

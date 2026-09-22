@@ -58,14 +58,18 @@ gqlcli types --filter User --args --desc   # with field argument types and doc s
 
 gqlcli describe User                    # SDL definition of a specific type
 gqlcli describe CreateUserInput --args  # include field argument signatures
-gqlcli describe Citizen --depth 1       # include directly referenced non-scalar types
-gqlcli describe Citizen --depth 2       # recurse one level deeper
+gqlcli describe Citizen --depth 1       # include directly referenced non-scalar types + matching ops/fields
+gqlcli describe Citizen --depth 2       # recurse one level deeper + widen reverse-lookup
+gqlcli describe Citizen --depth 1 --max-op-refs 0 --max-field-refs 0  # remove default caps
+# truncated reverse-reference sections print "(showing X of N)"
 ```
 
 Depth behavior for describe:
 - `--depth 0` only prints the requested type (default)
-- `--depth 1` includes directly referenced non-scalar types
-- `--depth N` recursively expands non-scalar references up to N levels (including `UNION`/`INTERFACE` `possibleTypes`) (including `UNION`/`INTERFACE` `possibleTypes`)
+- `--depth 1` includes directly referenced non-scalar types and appends top-level Query/Mutation fields plus non-root schema fields whose arg/return types reach the requested type within one hop
+- `--depth N` recursively expands non-scalar references up to N levels (including `UNION`/`INTERFACE` `possibleTypes`) and widens that reverse lookup to the same depth
+- Reverse-reference sections default to 5 top-level operation refs and 5 referencing schema types; pass `--max-op-refs 0 --max-field-refs 0` for no limit
+- When a reverse-reference section is capped, its header shows `(showing X of N)`
 
 ## Semantic search (find things by meaning)
 

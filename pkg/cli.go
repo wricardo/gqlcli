@@ -332,7 +332,7 @@ func (b *CLIBuilder) GetDescribeCommand() *cli.Command {
 		Aliases:     []string{"d"},
 		Usage:       "Show the SDL definition of a GraphQL type",
 		ArgsUsage:   "TYPE_NAME",
-		Description: "Print the SDL definition of a single named GraphQL type.\n\nUse this to understand the shape of any type before writing a query or mutation.\nAdd --args to see what arguments each field accepts, --desc for doc strings.\n\nExamples:\n  gqlcli describe User\n  gqlcli describe CreateUserInput --args\n  gqlcli describe Order --args --desc",
+		Description: "Print the SDL definition of a single named GraphQL type.\n\nUse this to understand the shape of any type before writing a query or mutation.\nAdd --args to see what arguments each field accepts, --desc for doc strings. When --depth >= 1, describe also appends top-level Query/Mutation fields and non-root schema fields whose arg or return types reference the requested type within that depth. Reverse-reference sections default to 5 matches each; pass 0 to show all. When capped, section headers show '(showing X of N)'.\n\nExamples:\n  gqlcli describe User\n  gqlcli describe CreateUserInput --args\n  gqlcli describe Order --args --desc\n  gqlcli describe SmsCampaign --depth 1\n  gqlcli describe SmsCampaign --depth 1 --max-op-refs 0 --max-field-refs 0",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "url",
@@ -364,8 +364,18 @@ func (b *CLIBuilder) GetDescribeCommand() *cli.Command {
 			},
 			&cli.IntFlag{
 				Name:  "depth",
-				Usage: "Recursively include referenced non-scalar types up to this depth (0 = only requested type)",
+				Usage: "Recursively include referenced non-scalar types up to this depth (0 = only requested type). When >= 1, also append top-level Query/Mutation fields and non-root schema fields that reference the requested type within that depth",
 				Value: 0,
+			},
+			&cli.IntFlag{
+				Name:  "max-op-refs",
+				Usage: "Maximum top-level operation references to append when --depth >= 1 (default: 5, 0 = unlimited; capped headers show 'showing X of N')",
+				Value: 5,
+			},
+			&cli.IntFlag{
+				Name:  "max-field-refs",
+				Usage: "Maximum referencing schema types to append in the fields section when --depth >= 1 (default: 5, 0 = unlimited; capped headers show 'showing X of N')",
+				Value: 5,
 			},
 			&cli.StringFlag{
 				Name:  "env",
@@ -385,9 +395,15 @@ func (b *CLIBuilder) GetDescribeCommand() *cli.Command {
 			if c.Int("depth") < 0 {
 				return fmt.Errorf("--depth must be >= 0")
 			}
+			if c.Int("max-op-refs") < 0 {
+				return fmt.Errorf("--max-op-refs must be >= 0")
+			}
+			if c.Int("max-field-refs") < 0 {
+				return fmt.Errorf("--max-field-refs must be >= 0")
+			}
 			typeName := c.Args().First()
 			d := NewDescriberFromHTTPClient(httpClient)
-			hint, err := d.DescribeWithDepth(context.Background(), typeName, c.Bool("args"), c.Bool("desc"), c.Int("depth"))
+			hint, err := d.DescribeWithDepthLimits(context.Background(), typeName, c.Bool("args"), c.Bool("desc"), c.Int("depth"), c.Int("max-op-refs"), c.Int("max-field-refs"))
 			if err != nil {
 				return err
 			}

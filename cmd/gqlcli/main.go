@@ -44,6 +44,8 @@ TYPICAL AI WORKFLOW
        gqlcli types --kind INPUT_OBJECT       # list all input types
        gqlcli describe User                   # SDL definition of a specific type
        gqlcli describe User --args            # include field argument signatures
+       gqlcli describe SmsCampaign --depth 1  # also show matching operations and schema fields
+       gqlcli describe SmsCampaign --depth 1 --max-op-refs 0 --max-field-refs 0
 
   3. Check an operation before running it (nothing is executed):
        gqlcli validate '{ users { id name } }'        # exits 1 and reports line:column on error
