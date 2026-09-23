@@ -472,3 +472,52 @@ func TestDescribeWithDepth_ZeroCapsMeanUnlimited(t *testing.T) {
 		}
 	}
 }
+
+func TestDescribeWithDepth_ServesTypesFromFullIntrospection(t *testing.T) {
+	d, fake := newFakeDescriber()
+	if _, err := d.DescribeWithDepthLimits(context.Background(), "SmsCampaign", true, true, 2, 0, 0); err != nil {
+		t.Fatalf("DescribeWithDepthLimits: %v", err)
+	}
+	if fake.calls["__schema"] != 1 {
+		t.Errorf("full introspection ran %d times, want 1", fake.calls["__schema"])
+	}
+	for name, n := range fake.calls {
+		if name != "__schema" && n > 0 {
+			t.Errorf("introspected %q %d times via __type, want 0 — the full schema already holds it", name, n)
+		}
+	}
+}
+
+func TestTypeInfoFromFullType_MatchesPerTypeQueryShape(t *testing.T) {
+	var full map[string]interface{}
+	if err := json.Unmarshal([]byte(`{
+		"name":"Status","kind":"OBJECT","description":"d",
+		"fields":[
+			{"name":"live","description":"x","isDeprecated":false,"deprecationReason":null,
+			 "type":{"kind":"SCALAR","name":"String"},
+			 "args":[{"name":"a","description":"arg doc","defaultValue":"1","type":{"kind":"SCALAR","name":"Int"}}]},
+			{"name":"old","isDeprecated":true,"type":{"kind":"SCALAR","name":"String"},"args":[]}
+		],
+		"inputFields":null,
+		"enumValues":null,
+		"possibleTypes":null
+	}`), &full); err != nil {
+		t.Fatal(err)
+	}
+	got := typeInfoFromFullType(full)
+	fields, _ := got["fields"].([]interface{})
+	if len(fields) != 1 {
+		t.Fatalf("fields = %v, want only the non-deprecated one", fields)
+	}
+	field := fields[0].(map[string]interface{})
+	if _, ok := field["isDeprecated"]; ok {
+		t.Errorf("field kept isDeprecated: %v", field)
+	}
+	arg := field["args"].([]interface{})[0].(map[string]interface{})
+	if _, ok := arg["description"]; ok {
+		t.Errorf("arg kept description, which the per-type query does not fetch: %v", arg)
+	}
+	if _, ok := arg["defaultValue"]; ok {
+		t.Errorf("arg kept defaultValue, which the per-type query does not fetch: %v", arg)
+	}
+}

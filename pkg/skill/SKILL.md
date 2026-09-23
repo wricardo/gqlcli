@@ -58,7 +58,7 @@ gqlcli types --filter User --args --desc   # with field argument types and doc s
 
 gqlcli describe User                    # SDL definition of a specific type
 gqlcli describe CreateUserInput --args  # include field argument signatures
-gqlcli describe Citizen --depth 1       # include directly referenced non-scalar types + matching ops/fields
+gqlcli describe Citizen --depth 1       # include directly referenced non-scalar types + reverse references
 gqlcli describe Citizen --depth 2       # recurse one level deeper + widen reverse-lookup
 gqlcli describe Citizen --depth 1 --max-op-refs 0 --max-field-refs 0  # remove default caps
 # truncated reverse-reference sections print "(showing X of N)"
@@ -66,11 +66,15 @@ gqlcli describe Citizen --depth 1 --max-op-refs 0 --max-field-refs 0  # remove d
 
 Depth behavior for describe:
 - `--depth 0` only prints the requested type (default)
-- `--depth 1` includes directly referenced non-scalar types and appends top-level Query/Mutation fields plus non-root schema fields whose arg/return types reach the requested type within one hop
+- `--depth 1` includes directly referenced non-scalar types **and appends reverse-reference sections**:
+  - `# Referenced by top-level operations` — Query/Mutation fields whose args or return types reach the requested type
+  - `# Referenced by fields` — non-root schema types/fields that point at the requested type
 - `--depth N` recursively expands non-scalar references up to N levels (including `UNION`/`INTERFACE` `possibleTypes`) and widens that reverse lookup to the same depth
 - Top-level Query/Mutation matches are ranked: arg matches first, then shallower return-type matches before deeper wrapper/pagination matches
 - Reverse-reference sections default to 5 top-level operation refs and 5 referencing schema types; pass `--max-op-refs 0 --max-field-refs 0` for no limit
 - When a reverse-reference section is capped, its header shows `(showing X of N)`
+
+This is especially useful when you already know the right **type** but not yet the right **operation**. For example, `describe --depth 1 XmlPathCampaign` shows not just the campaign fields, but also top-level operations like `xmlPathCampaign(...)` / `xmlPathCampaigns` and related types like `XmlPathSession` and `XmlPathSimulation`. Likewise, `describe --depth 1 ScorecardRunLog` surfaces related entry points such as scorecard result queries and fields like `PhoneCall.scorecardResults`.
 
 ## Semantic search (find things by meaning)
 

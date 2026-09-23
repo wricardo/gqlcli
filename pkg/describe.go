@@ -24,6 +24,11 @@ type Describer struct {
 	schemaOnce sync.Once
 	schema     schemaIndex
 	schemaErr  error
+
+	reverseOnce sync.Once
+	reverse     map[string][]string
+	reverseErr  error
+	distances   sync.Map
 }
 
 type schemaIndex struct {
@@ -232,6 +237,15 @@ func (d *Describer) DescribeWithDepthLimits(ctx context.Context, typeName string
 	}
 	if maxFieldRefs < 0 {
 		maxFieldRefs = 0
+	}
+
+	if depth >= 1 {
+		// The reverse-reference sections need the full schema anyway. Loading
+		// it first seeds the per-type cache, so the forward recursion and the
+		// reverse lookup never fall back to one __type round trip per type.
+		if _, err := d.schemaTypes(ctx); err != nil {
+			return "", err
+		}
 	}
 
 	root, err := d.fetch(ctx, typeName)
@@ -643,51 +657,81 @@ func (d *Describer) typeRefMatchDepth(ctx context.Context, typeRef interface{}, 
 	if typeName == "" {
 		return 0, false, nil
 	}
-	return d.typeContainsTargetDepth(ctx, typeName, targetType, depth, map[string]int{})
-}
-
-func (d *Describer) typeContainsTargetDepth(ctx context.Context, typeName, targetType string, depth int, seen map[string]int) (int, bool, error) {
 	if typeName == targetType {
 		return 0, true, nil
 	}
-	if depth == 0 || isBuiltInScalar(typeName) || strings.HasPrefix(typeName, "__") {
-		return 0, false, nil
-	}
-	if prev, ok := seen[typeName]; ok && prev >= depth {
-		return 0, false, nil
-	}
-	seen[typeName] = depth
-
-	typeInfo, err := d.fetch(ctx, typeName)
+	dist, err := d.targetDistances(ctx, targetType, depth)
 	if err != nil {
 		return 0, false, err
 	}
-	bestDepth := -1
-	for _, depName := range collectReferencedTypeNames(typeInfo) {
-		depDepth, ok, err := d.typeContainsTargetDepth(ctx, depName, targetType, depth-1, cloneDepthSeen(seen))
-		if err != nil {
-			return 0, false, err
-		}
-		if !ok {
-			continue
-		}
-		candidate := depDepth + 1
-		if bestDepth == -1 || candidate < bestDepth {
-			bestDepth = candidate
-		}
-	}
-	if bestDepth >= 0 {
-		return bestDepth, true, nil
-	}
-	return 0, false, nil
+	hops, ok := dist[typeName]
+	return hops, ok, nil
 }
 
-func cloneDepthSeen(seen map[string]int) map[string]int {
-	out := make(map[string]int, len(seen))
-	for k, v := range seen {
-		out[k] = v
+// targetDistances maps every type that reaches targetType within depth
+// reference hops to its shortest hop count, via breadth-first search over the
+// reverse reference graph. Results are memoized per (targetType, depth), so a
+// reverse lookup costs one graph walk rather than one per candidate field.
+func (d *Describer) targetDistances(ctx context.Context, targetType string, depth int) (map[string]int, error) {
+	key := fmt.Sprintf("%s\x00%d", targetType, depth)
+	if cached, ok := d.distances.Load(key); ok {
+		return cached.(map[string]int), nil
 	}
-	return out
+	reverse, err := d.reverseReferences(ctx)
+	if err != nil {
+		return nil, err
+	}
+	dist := map[string]int{targetType: 0}
+	frontier := []string{targetType}
+	for hops := 1; hops <= depth && len(frontier) > 0; hops++ {
+		var next []string
+		for _, name := range frontier {
+			for _, referrer := range reverse[name] {
+				if _, done := dist[referrer]; done {
+					continue
+				}
+				dist[referrer] = hops
+				next = append(next, referrer)
+			}
+		}
+		frontier = next
+	}
+	d.distances.Store(key, dist)
+	return dist, nil
+}
+
+// reverseReferences maps each type name to the schema types whose fields,
+// arguments, input fields or possible types reference it directly. Built-in
+// scalars and introspection types never act as referrers.
+func (d *Describer) reverseReferences(ctx context.Context) (map[string][]string, error) {
+	d.reverseOnce.Do(func() {
+		schema, err := d.schemaTypes(ctx)
+		if err != nil {
+			d.reverseErr = err
+			return
+		}
+		reverse := map[string][]string{}
+		for _, raw := range schema.types {
+			tm, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			name, _ := tm["name"].(string)
+			if name == "" || isBuiltInScalar(name) || strings.HasPrefix(name, "__") {
+				continue
+			}
+			typeInfo, err := d.fetch(ctx, name)
+			if err != nil {
+				d.reverseErr = err
+				return
+			}
+			for _, dep := range collectReferencedTypeNames(typeInfo) {
+				reverse[dep] = append(reverse[dep], name)
+			}
+		}
+		d.reverse = reverse
+	})
+	return d.reverse, d.reverseErr
 }
 
 func baseTypeName(typeData interface{}) string {
@@ -752,6 +796,15 @@ func (d *Describer) schemaTypes(ctx context.Context) (schemaIndex, error) {
 		if st, ok := schema["subscriptionType"].(map[string]interface{}); ok {
 			d.schema.subscriptionType, _ = st["name"].(string)
 		}
+		for _, raw := range types {
+			tm, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if name, _ := tm["name"].(string); name != "" {
+				d.cache.LoadOrStore(name, typeInfoFromFullType(tm))
+			}
+		}
 	})
 	return d.schema, d.schemaErr
 }
@@ -784,6 +837,74 @@ func (d *Describer) fetch(ctx context.Context, typeName string) (map[string]inte
 
 	d.cache.Store(typeName, typeInfo)
 	return typeInfo, nil
+}
+
+// typeInfoFromFullType projects a type from FullIntrospectionQuery onto the
+// shape buildDescribeQuery returns, so a cache entry renders the same whichever
+// query filled it. The full query includes deprecated fields and enum values;
+// the per-type query does not.
+func typeInfoFromFullType(tm map[string]interface{}) map[string]interface{} {
+	out := map[string]interface{}{
+		"name":          tm["name"],
+		"kind":          tm["kind"],
+		"description":   tm["description"],
+		"fields":        nil,
+		"inputFields":   nil,
+		"enumValues":    nil,
+		"possibleTypes": tm["possibleTypes"],
+	}
+	if fields, ok := tm["fields"].([]interface{}); ok {
+		projected := make([]interface{}, 0, len(fields))
+		for _, f := range fields {
+			fm, ok := f.(map[string]interface{})
+			if !ok || isDeprecated(fm) {
+				continue
+			}
+			args := []interface{}{}
+			if rawArgs, ok := fm["args"].([]interface{}); ok {
+				for _, a := range rawArgs {
+					if am, ok := a.(map[string]interface{}); ok {
+						args = append(args, map[string]interface{}{"name": am["name"], "type": am["type"]})
+					}
+				}
+			}
+			projected = append(projected, map[string]interface{}{
+				"name":        fm["name"],
+				"description": fm["description"],
+				"type":        fm["type"],
+				"args":        args,
+			})
+		}
+		out["fields"] = projected
+	}
+	if inputFields, ok := tm["inputFields"].([]interface{}); ok {
+		projected := make([]interface{}, 0, len(inputFields))
+		for _, f := range inputFields {
+			if fm, ok := f.(map[string]interface{}); ok {
+				projected = append(projected, map[string]interface{}{
+					"name":        fm["name"],
+					"description": fm["description"],
+					"type":        fm["type"],
+				})
+			}
+		}
+		out["inputFields"] = projected
+	}
+	if enumValues, ok := tm["enumValues"].([]interface{}); ok {
+		projected := make([]interface{}, 0, len(enumValues))
+		for _, v := range enumValues {
+			if vm, ok := v.(map[string]interface{}); ok && !isDeprecated(vm) {
+				projected = append(projected, map[string]interface{}{"name": vm["name"]})
+			}
+		}
+		out["enumValues"] = projected
+	}
+	return out
+}
+
+func isDeprecated(m map[string]interface{}) bool {
+	dep, _ := m["isDeprecated"].(bool)
+	return dep
 }
 
 func buildDescribeQuery(typeName string) string {
