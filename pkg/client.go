@@ -284,9 +284,17 @@ func (c *HTTPClient) ExecuteMutation(ctx context.Context, mode ExecutionMode, op
 	return c.executeOperation(ctx, opts.Mutation, variables, opts.OperationName)
 }
 
-// Introspect queries the GraphQL schema
+// Introspect queries the GraphQL schema. When Config.SchemaCacheTTL is set, a
+// result cached on disk within that TTL is returned without a request.
 func (c *HTTPClient) Introspect(ctx context.Context) (map[string]interface{}, error) {
-	return c.executeOperation(ctx, FullIntrospectionQuery, nil, "")
+	if result, ok := c.readSchemaCache(); ok {
+		return result, nil
+	}
+	result, err := c.executeOperation(ctx, FullIntrospectionQuery, nil, "")
+	if err == nil {
+		c.writeSchemaCache(result)
+	}
+	return result, err
 }
 
 // executeOperation is the internal method that handles request/response

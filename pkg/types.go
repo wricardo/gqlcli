@@ -24,6 +24,11 @@ type Config struct {
 	Debug      bool              // Enable debug logging (logs requests/responses)
 	Insecure   bool              // Skip TLS certificate verification (default: false)
 	Headers    map[string]string // Custom HTTP headers sent with every request
+
+	// Schema cache: full introspection results reused across processes.
+	SchemaCacheTTL time.Duration // How long a cached schema stays valid; 0 disables the cache (default)
+	SchemaCacheDir string        // Cache directory (default: <user cache dir>/gqlcli)
+	RefreshSchema  bool          // Ignore any cached schema, but still store the fresh one
 }
 
 // AuthConfig holds authentication configuration

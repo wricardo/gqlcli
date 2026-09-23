@@ -159,6 +159,8 @@ func (b *CLIBuilder) embedIndexCommand() *cli.Command {
 		&cli.DurationFlag{Name: "retry-delay", Usage: "Delay between retries (e.g. 500ms, 2s)", Value: b.config.RetryDelay},
 		&cli.BoolFlag{Name: "strict", Usage: "Exit non-zero when response.errors is present", Value: b.config.Strict},
 		headerFlag(),
+		schemaCacheTTLFlag(),
+		refreshSchemaFlag(),
 	}
 	flags = append(flags, embedderFlags()...)
 

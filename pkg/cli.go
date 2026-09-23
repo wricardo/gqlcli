@@ -102,6 +102,8 @@ func (b *CLIBuilder) applyEnvConfig(c *cli.Context) error {
 		b.config.RetryDelay = c.Duration("retry-delay")
 	}
 	b.config.Strict = c.Bool("strict")
+	b.config.SchemaCacheTTL = c.Duration("schema-cache-ttl")
+	b.config.RefreshSchema = c.Bool("refresh-schema")
 	return nil
 }
 
@@ -110,6 +112,22 @@ func headerFlag() cli.Flag {
 		Name:    "header",
 		Aliases: []string{"H"},
 		Usage:   "HTTP header as KEY=VALUE (repeatable)",
+	}
+}
+
+func schemaCacheTTLFlag() cli.Flag {
+	return &cli.DurationFlag{
+		Name:    "schema-cache-ttl",
+		Usage:   "Reuse a schema introspected within this long, cached on disk; 0 disables the cache",
+		Value:   DefaultSchemaCacheTTL,
+		EnvVars: []string{"GQLCLI_SCHEMA_CACHE_TTL"},
+	}
+}
+
+func refreshSchemaFlag() cli.Flag {
+	return &cli.BoolFlag{
+		Name:  "refresh-schema",
+		Usage: "Ignore the cached schema and introspect the endpoint again",
 	}
 }
 
@@ -382,6 +400,8 @@ func (b *CLIBuilder) GetDescribeCommand() *cli.Command {
 				Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
 			},
 			headerFlag(),
+			schemaCacheTTLFlag(),
+			refreshSchemaFlag(),
 		},
 		Action: func(c *cli.Context) error {
 			if err := b.applyEnvConfig(c); err != nil {
@@ -482,6 +502,8 @@ func (b *CLIBuilder) GetTypesCommand() *cli.Command {
 				Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
 			},
 			headerFlag(),
+			schemaCacheTTLFlag(),
+			refreshSchemaFlag(),
 		},
 		Action: func(c *cli.Context) error {
 			if err := b.applyEnvConfig(c); err != nil {
@@ -615,6 +637,8 @@ func (b *CLIBuilder) GetQueriesCommand() *cli.Command {
 				Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
 			},
 			headerFlag(),
+			schemaCacheTTLFlag(),
+			refreshSchemaFlag(),
 		},
 		Action: func(c *cli.Context) error {
 			if err := b.applyEnvConfig(c); err != nil {
@@ -756,6 +780,8 @@ func (b *CLIBuilder) GetMutationsCommand() *cli.Command {
 				Usage: "Environment to use from .gqlcli.json (e.g. local, prod)",
 			},
 			headerFlag(),
+			schemaCacheTTLFlag(),
+			refreshSchemaFlag(),
 		},
 		Action: func(c *cli.Context) error {
 			if err := b.applyEnvConfig(c); err != nil {
@@ -991,6 +1017,8 @@ func (b *CLIBuilder) getOperationFlags() []cli.Flag {
 			Usage: "Named operation from .gqlcli.json (provides query/mutation string + default variables)",
 		},
 		headerFlag(),
+		schemaCacheTTLFlag(),
+		refreshSchemaFlag(),
 		&cli.BoolFlag{
 			Name:  "validate-only",
 			Usage: "Check the document against the schema and exit without running it (see the validate command)",

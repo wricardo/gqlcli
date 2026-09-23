@@ -74,6 +74,21 @@ Depth behavior for describe:
 - Reverse-reference sections default to 5 top-level operation refs and 5 referencing schema types; pass `--max-op-refs 0 --max-field-refs 0` for no limit
 - When a reverse-reference section is capped, its header shows `(showing X of N)`
 
+### Schema cache
+
+Schema commands (`describe`, `queries`, `mutations`, `types`, `sdl`, `validate`, `embed`, and
+`query`/`mutation` schema hints) reuse the full introspection result cached on disk for 10 minutes,
+so repeated exploration costs one network round trip instead of one per command. The cache is
+keyed by URL + headers (auth-specific schemas never mix; header values are not written to disk).
+
+```bash
+gqlcli describe Citizen --depth 1 --refresh-schema   # schema just deployed — ignore the cache
+gqlcli describe Citizen --schema-cache-ttl 1h        # keep entries longer
+gqlcli describe Citizen --schema-cache-ttl 0         # disable (env: GQLCLI_SCHEMA_CACHE_TTL)
+```
+
+Pass `--refresh-schema` after a schema deploy when a field you expect is missing.
+
 This is especially useful when you already know the right **type** but not yet the right **operation**. For example, `describe --depth 1 XmlPathCampaign` shows not just the campaign fields, but also top-level operations like `xmlPathCampaign(...)` / `xmlPathCampaigns` and related types like `XmlPathSession` and `XmlPathSimulation`. Likewise, `describe --depth 1 ScorecardRunLog` surfaces related entry points such as scorecard result queries and fields like `PhoneCall.scorecardResults`.
 
 ## Semantic search (find things by meaning)

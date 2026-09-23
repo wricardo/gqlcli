@@ -521,3 +521,18 @@ func TestTypeInfoFromFullType_MatchesPerTypeQueryShape(t *testing.T) {
 		t.Errorf("arg kept defaultValue, which the per-type query does not fetch: %v", arg)
 	}
 }
+
+func TestDescribeWithOptions_DepthServesTypesFromFullIntrospection(t *testing.T) {
+	d, fake := newFakeDescriber()
+	if _, err := d.DescribeWithOptions(context.Background(), "Query", DescribeOptions{FieldFilter: "campaign", ShowArgs: true, Depth: 2}); err != nil {
+		t.Fatalf("DescribeWithOptions: %v", err)
+	}
+	if fake.calls["__schema"] != 1 {
+		t.Errorf("full introspection ran %d times, want 1", fake.calls["__schema"])
+	}
+	for name, n := range fake.calls {
+		if name != "__schema" && n > 0 {
+			t.Errorf("introspected %q %d times via __type, want 0", name, n)
+		}
+	}
+}

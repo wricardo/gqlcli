@@ -120,6 +120,7 @@ gqlcli queries --filter user -f compact         # Minimal JSON
 - Debug mode for request/response logging
 - Per-request `--header/-H` overrides for one-off auth, tenant, trace, or preview headers
 - HTTP controls: opt-in `--timeout`, plus `--retry`, `--retry-delay`, `--strict` (default true), and `--insecure`
+- On-disk schema cache (10m default): repeated `describe`/`queries`/`types`/`validate` skip introspection; `--refresh-schema` to bypass, `--schema-cache-ttl 0` to disable
 - Response metadata inspection with `--include-headers`, `--dump-headers`, and repeatable `--metadata` selectors
 
 ### 📝 Input Methods
@@ -643,6 +644,8 @@ gqlcli types --output types.json
 --retry-delay DURATION       Delay between retries (e.g. 500ms, 2s)
 --strict     Exit non-zero when response.errors is present (default: true; use --strict=false to disable)
 --insecure                   Skip TLS certificate verification
+--schema-cache-ttl DURATION  Reuse the on-disk introspection cache this long (default 10m; 0 disables; env: GQLCLI_SCHEMA_CACHE_TTL)
+--refresh-schema             Ignore the cached schema and introspect again
 -u, --url URL                GraphQL endpoint (env: GRAPHQL_URL)
 --env VALUE                  Environment from .gqlcli.json
 -d, --debug                  Enable HTTP debug logging

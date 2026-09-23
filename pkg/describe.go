@@ -29,6 +29,10 @@ type Describer struct {
 	reverse     map[string][]string
 	reverseErr  error
 	distances   sync.Map
+
+	// schemaIsCheap, when set and true, makes fetch load the full schema
+	// instead of issuing a __type request — e.g. when it is cached on disk.
+	schemaIsCheap func() bool
 }
 
 type schemaIndex struct {
@@ -76,9 +80,15 @@ func NewDescriber(exec *InlineExecutor) *Describer {
 // NewDescriberFromHTTPClient creates a Describer that fetches type information
 // via introspection against the given HTTP client.
 func NewDescriberFromHTTPClient(c *HTTPClient) *Describer {
-	d := &Describer{}
+	d := &Describer{schemaIsCheap: c.schemaCacheFresh}
 	d.exec = func(ctx context.Context, query string, vars map[string]interface{}) (json.RawMessage, error) {
-		result, err := c.executeOperation(ctx, query, vars, "")
+		var result map[string]interface{}
+		var err error
+		if query == FullIntrospectionQuery {
+			result, err = c.Introspect(ctx)
+		} else {
+			result, err = c.executeOperation(ctx, query, vars, "")
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -128,6 +138,13 @@ func (d *Describer) DescribeWithOptions(ctx context.Context, typeName string, op
 	depth := opts.Depth
 	if depth < 0 {
 		depth = 0
+	}
+	if depth >= 1 {
+		// Recursion can reach hundreds of types; one full introspection is
+		// cheaper than a __type round trip for each.
+		if _, err := d.schemaTypes(ctx); err != nil {
+			return "", err
+		}
 	}
 
 	typeInfo, err := d.fetch(ctx, typeName)
@@ -813,6 +830,14 @@ func (d *Describer) schemaTypes(ctx context.Context) (schemaIndex, error) {
 func (d *Describer) fetch(ctx context.Context, typeName string) (map[string]interface{}, error) {
 	if cached, ok := d.cache.Load(typeName); ok {
 		return cached.(map[string]interface{}), nil
+	}
+	if d.schemaIsCheap != nil && d.schemaIsCheap() {
+		// A failed load is not fatal here: the __type request below still works.
+		if _, err := d.schemaTypes(ctx); err == nil {
+			if cached, ok := d.cache.Load(typeName); ok {
+				return cached.(map[string]interface{}), nil
+			}
+		}
 	}
 
 	raw, err := d.exec(ctx, buildDescribeQuery(typeName), nil)
