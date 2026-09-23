@@ -881,6 +881,7 @@ func (b *CLIBuilder) RegisterCommands(app *cli.App) {
 		b.GetLoginCommand(),
 		b.GetLogoutCommand(),
 		b.GetOpCommand(),
+		b.GetSchemaCommand(),
 	)
 }
 

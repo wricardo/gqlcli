@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -22,13 +23,9 @@ func (c *HTTPClient) schemaCachePath() string {
 	if c.config.SchemaCacheTTL <= 0 {
 		return ""
 	}
-	dir := c.config.SchemaCacheDir
+	dir := c.schemaCacheDir()
 	if dir == "" {
-		base, err := os.UserCacheDir()
-		if err != nil {
-			return ""
-		}
-		dir = filepath.Join(base, "gqlcli")
+		return ""
 	}
 
 	h := sha256.New()
@@ -47,6 +44,19 @@ func (c *HTTPClient) schemaCachePath() string {
 	h.Write([]byte{0})
 	h.Write([]byte(c.config.Token))
 	return filepath.Join(dir, "schema-"+hex.EncodeToString(h.Sum(nil))[:32]+".json")
+}
+
+// schemaCacheDir returns the directory holding cache entries, or "" when the
+// user cache dir cannot be determined.
+func (c *HTTPClient) schemaCacheDir() string {
+	if c.config.SchemaCacheDir != "" {
+		return c.config.SchemaCacheDir
+	}
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(base, "gqlcli")
 }
 
 // schemaCacheFresh reports whether Introspect would be served from disk.
@@ -74,35 +84,42 @@ func (c *HTTPClient) readSchemaCache() (map[string]interface{}, bool) {
 	return result, true
 }
 
-// writeSchemaCache stores result best-effort: a cache that cannot be written
-// only costs the next command a network round trip.
-func (c *HTTPClient) writeSchemaCache(result map[string]interface{}) {
+// writeSchemaCache stores result on disk. Introspect ignores its error: a
+// cache that cannot be written only costs the next command a round trip.
+func (c *HTTPClient) writeSchemaCache(result map[string]interface{}) error {
 	path := c.schemaCachePath()
-	if path == "" || !hasIntrospectedSchema(result) {
-		return
+	if path == "" {
+		return fmt.Errorf("schema cache is disabled")
+	}
+	if !hasIntrospectedSchema(result) {
+		return fmt.Errorf("introspection response has no schema")
 	}
 	raw, err := json.Marshal(result)
 	if err != nil {
-		return
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return
+		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".schema-*.tmp")
 	if err != nil {
-		return
+		return err
 	}
 	_, werr := tmp.Write(raw)
 	cerr := tmp.Close()
 	if werr != nil || cerr != nil {
 		_ = os.Remove(tmp.Name())
-		return
+		if werr != nil {
+			return werr
+		}
+		return cerr
 	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		_ = os.Remove(tmp.Name())
-		return
+		return err
 	}
 	pruneSchemaCache(filepath.Dir(path), c.config.SchemaCacheTTL)
+	return nil
 }
 
 // schemaCacheRetention bounds how long expired entries linger. Each token

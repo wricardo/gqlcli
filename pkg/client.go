@@ -291,8 +291,8 @@ func (c *HTTPClient) Introspect(ctx context.Context) (map[string]interface{}, er
 		return result, nil
 	}
 	result, err := c.executeOperation(ctx, FullIntrospectionQuery, nil, "")
-	if err == nil {
-		c.writeSchemaCache(result)
+	if err == nil && c.schemaCachePath() != "" {
+		_ = c.writeSchemaCache(result)
 	}
 	return result, err
 }

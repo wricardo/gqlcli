@@ -87,7 +87,18 @@ gqlcli describe Citizen --schema-cache-ttl 1h        # keep entries longer
 gqlcli describe Citizen --schema-cache-ttl 0         # disable (env: GQLCLI_SCHEMA_CACHE_TTL)
 ```
 
-Pass `--refresh-schema` after a schema deploy when a field you expect is missing.
+Manage the cache directly with the `schema` command group:
+
+```bash
+gqlcli schema refresh --env prod   # re-introspect now and overwrite the cache entry
+gqlcli schema status --env prod    # url, cache path, TTL, age, fresh/expired/missing
+gqlcli schema clear --env prod     # delete this env's entry
+gqlcli schema clear --all          # delete every cached schema
+```
+
+The cache only refreshes when its TTL expires — it does not detect schema changes. After a
+schema deploy, run `gqlcli schema refresh` (or pass `--refresh-schema`) when a field you expect
+is missing or `validate` rejects a field that should exist.
 
 This is especially useful when you already know the right **type** but not yet the right **operation**. For example, `describe --depth 1 XmlPathCampaign` shows not just the campaign fields, but also top-level operations like `xmlPathCampaign(...)` / `xmlPathCampaigns` and related types like `XmlPathSession` and `XmlPathSimulation`. Likewise, `describe --depth 1 ScorecardRunLog` surfaces related entry points such as scorecard result queries and fields like `PhoneCall.scorecardResults`.
 

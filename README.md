@@ -120,7 +120,7 @@ gqlcli queries --filter user -f compact         # Minimal JSON
 - Debug mode for request/response logging
 - Per-request `--header/-H` overrides for one-off auth, tenant, trace, or preview headers
 - HTTP controls: opt-in `--timeout`, plus `--retry`, `--retry-delay`, `--strict` (default true), and `--insecure`
-- On-disk schema cache (10m default): repeated `describe`/`queries`/`types`/`validate` skip introspection; `--refresh-schema` to bypass, `--schema-cache-ttl 0` to disable
+- On-disk schema cache (10m default): repeated `describe`/`queries`/`types`/`validate` skip introspection; `--refresh-schema` to bypass, `--schema-cache-ttl 0` to disable; `gqlcli schema refresh|status|clear [--all]` to manage it
 - Response metadata inspection with `--include-headers`, `--dump-headers`, and repeatable `--metadata` selectors
 
 ### 📝 Input Methods
