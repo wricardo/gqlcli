@@ -62,7 +62,16 @@ gqlcli describe Citizen --depth 1       # include directly referenced non-scalar
 gqlcli describe Citizen --depth 2       # recurse one level deeper + widen reverse-lookup
 gqlcli describe Citizen --depth 1 --max-op-refs 0 --max-field-refs 0  # remove default caps
 # truncated reverse-reference sections print "(showing X of N)"
+
+gqlcli describe Query.smsCampaign --args           # describe one exact operation, not a type
+gqlcli describe Query.smsCampaign --args --depth 1 # + expand its arg/return types
 ```
+
+`Type.field` (e.g. `Query.smsCampaign`, `Mutation.createUser`) describes exactly one field's call
+signature instead of a whole type. Use it when `queries --filter`/`mutations --filter` would match
+several fields by substring (e.g. `smsCampaign` also matches `smsCampaigns`,
+`smsCampaignPreview`) and you want exactly one. `--depth` still expands the referenced
+arg/return types; reverse-reference sections are skipped since `Query`/`Mutation` are root types.
 
 Depth behavior for describe:
 - `--depth 0` only prints the requested type (default)

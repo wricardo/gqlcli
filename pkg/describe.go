@@ -245,6 +245,13 @@ func (d *Describer) DescribeWithDepth(ctx context.Context, typeName string, show
 // DescribeWithDepthLimits is like DescribeWithDepth, but lets callers override
 // the caps for reverse-reference sections. maxOperationRefs and maxFieldRefs use
 // 0 to mean unlimited.
+//
+// typeName also accepts "Type.field" (e.g. "Query.smsCampaign") to describe a
+// single field's call signature instead of a whole type — the same field a
+// substring match on queries/mutations --filter could pick up, but selected
+// exactly. Depth then expands only the types that field's args/return type
+// reference; reverse-reference sections are skipped, since Query/Mutation
+// fields are themselves the thing those sections would otherwise point back to.
 func (d *Describer) DescribeWithDepthLimits(ctx context.Context, typeName string, showArgs, showDescriptions bool, depth, maxOperationRefs, maxFieldRefs int) (string, error) {
 	if depth < 0 {
 		depth = 0
@@ -265,9 +272,31 @@ func (d *Describer) DescribeWithDepthLimits(ctx context.Context, typeName string
 		}
 	}
 
-	root, err := d.fetch(ctx, typeName)
-	if err != nil {
-		return "", err
+	rootType, fieldName, isField := parseTypeField(typeName)
+
+	var root map[string]interface{}
+	reverseRefType := typeName
+	if isField {
+		rootInfo, err := d.fetch(ctx, rootType)
+		if err != nil {
+			return "", err
+		}
+		field, err := findFieldByName(rootInfo, fieldName)
+		if err != nil {
+			return "", err
+		}
+		root = map[string]interface{}{
+			"name":   rootType,
+			"kind":   rootInfo["kind"],
+			"fields": []interface{}{field},
+		}
+		reverseRefType = rootType
+	} else {
+		var err error
+		root, err = d.fetch(ctx, typeName)
+		if err != nil {
+			return "", err
+		}
 	}
 
 	var out strings.Builder
@@ -276,14 +305,45 @@ func (d *Describer) DescribeWithDepthLimits(ctx context.Context, typeName string
 		return "", err
 	}
 	if depth >= 1 {
-		if err := d.appendReferencingOperations(ctx, &out, typeName, showDescriptions, depth, maxOperationRefs); err != nil {
+		if err := d.appendReferencingOperations(ctx, &out, reverseRefType, showDescriptions, depth, maxOperationRefs); err != nil {
 			return "", err
 		}
-		if err := d.appendReferencingFields(ctx, &out, typeName, showDescriptions, depth, maxFieldRefs); err != nil {
+		if err := d.appendReferencingFields(ctx, &out, reverseRefType, showDescriptions, depth, maxFieldRefs); err != nil {
 			return "", err
 		}
 	}
 	return out.String(), nil
+}
+
+// parseTypeField splits a "Type.field" selector into its parts. ok is false
+// for a plain type name (no dot) or a malformed selector (empty type or field).
+func parseTypeField(typeName string) (rootType, fieldName string, ok bool) {
+	dot := strings.IndexByte(typeName, '.')
+	if dot < 0 {
+		return "", "", false
+	}
+	rootType, fieldName = typeName[:dot], typeName[dot+1:]
+	if rootType == "" || fieldName == "" || strings.ContainsRune(fieldName, '.') {
+		return "", "", false
+	}
+	return rootType, fieldName, true
+}
+
+// findFieldByName returns the exact-named field from typeInfo's "fields", or
+// an error naming the type and field when no such field exists.
+func findFieldByName(typeInfo map[string]interface{}, fieldName string) (map[string]interface{}, error) {
+	fields, _ := typeInfo["fields"].([]interface{})
+	for _, f := range fields {
+		fm, ok := f.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if name, _ := fm["name"].(string); name == fieldName {
+			return fm, nil
+		}
+	}
+	typeName, _ := typeInfo["name"].(string)
+	return nil, fmt.Errorf("field %q not found on type %q", fieldName, typeName)
 }
 
 // DescribeWithFieldFilter returns SDL for typeName with only fields whose names

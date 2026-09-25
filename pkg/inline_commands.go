@@ -139,7 +139,7 @@ func (cs *InlineCommandSet) describeCommand() *cli.Command {
 		Name:      "describe",
 		Aliases:   []string{"d"},
 		Usage:     "Show the SDL definition of a GraphQL type",
-		ArgsUsage: "TYPE_NAME",
+		ArgsUsage: "TYPE_NAME | TYPE_NAME.FIELD_NAME",
 		Flags: []cli.Flag{
 			&cli.BoolFlag{Name: "args", Aliases: []string{"a"}, Usage: "Expand field argument signatures"},
 			&cli.BoolFlag{Name: "desc", Aliases: []string{"descriptions"}, Usage: "Include field/type descriptions"},

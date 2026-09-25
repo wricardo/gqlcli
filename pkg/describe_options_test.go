@@ -346,6 +346,44 @@ func TestDescribeWithDepth_IncludesReferencingOperations(t *testing.T) {
 	}
 }
 
+func TestDescribeWithDepthLimits_TypeFieldSelectsExactlyOneField(t *testing.T) {
+	d, _ := newFakeDescriber()
+
+	sdl, err := d.DescribeWithDepthLimits(context.Background(), "Query.smsCampaign", true, false, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("DescribeWithDepthLimits: %v", err)
+	}
+	if !strings.Contains(sdl, "smsCampaign(id: ID!): SmsCampaign") {
+		t.Errorf("SDL = %q, want the selected field's signature", sdl)
+	}
+	if strings.Contains(sdl, "smsCampaigns(") || strings.Contains(sdl, "smsCampaignPreview") || strings.Contains(sdl, "smsCampaignBySlug") {
+		t.Errorf("SDL = %q, want only the exact field, not other substring matches", sdl)
+	}
+}
+
+func TestDescribeWithDepthLimits_TypeFieldExpandsAtDepth(t *testing.T) {
+	d, _ := newFakeDescriber()
+
+	sdl, err := d.DescribeWithDepthLimits(context.Background(), "Query.smsCampaign", true, false, 1, 0, 0)
+	if err != nil {
+		t.Fatalf("DescribeWithDepthLimits: %v", err)
+	}
+	if !strings.Contains(sdl, "type SmsCampaign {") {
+		t.Errorf("SDL = %q, want depth to pull in the field's return type", sdl)
+	}
+	if strings.Contains(sdl, "# Referenced by") {
+		t.Errorf("SDL = %q, did not want reverse-reference sections for a field selector", sdl)
+	}
+}
+
+func TestDescribeWithDepthLimits_TypeFieldUnknownFieldErrors(t *testing.T) {
+	d, _ := newFakeDescriber()
+
+	if _, err := d.DescribeWithDepthLimits(context.Background(), "Query.doesNotExist", false, false, 0, 0, 0); err == nil {
+		t.Fatal("DescribeWithDepthLimits: want error for unknown field, got nil")
+	}
+}
+
 func TestDescribeWithDepth_DoesNotIncludeReferencingOperationsAtDepthZero(t *testing.T) {
 	d, _ := newFakeDescriber()
 

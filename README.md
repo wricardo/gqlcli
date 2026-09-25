@@ -65,6 +65,9 @@ gqlcli describe SmsCampaign --depth 1
 gqlcli describe SmsCampaign --depth 1 --max-op-refs 0 --max-field-refs 0
 # Truncated sections say "(showing X of N)"
 
+# Describe exactly one operation instead of a substring match
+gqlcli describe Query.smsCampaign --args --depth 1
+
 # Execute a mutation with variables
 gqlcli mutation \
   --mutation "mutation CreateUser(\$input: CreateUserInput!) { createUser(input: \$input) { id } }" \
@@ -801,7 +804,9 @@ Saved scripts live inline under `.gqlcli.json` `scripts` and run with `gqlcli sc
 
 ### `describe` Command
 ```
-TYPE_NAME                    Name of the type to describe (required)
+TYPE_NAME | TYPE_NAME.FIELD_NAME   Name of the type to describe, or Type.field
+                              (e.g. Query.smsCampaign) to describe exactly one
+                              operation instead of the whole Query/Mutation type
 --args, -a                   Expand field argument signatures
 --desc                        Include field/type descriptions
 --depth N                    Recursively include referenced non-scalar types; when N >= 1 also append top-level Query/Mutation fields and non-root schema fields that reference the requested type within that depth
