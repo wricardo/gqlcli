@@ -9,5 +9,4 @@ export { formatOutput, stripNulls, OUTPUT_FORMATS, type OutputFormat } from "./f
 export { executeBatch, type BatchOptions } from "./batch.ts";
 export { runScript, ScriptError, type ScriptOptions, type ScriptResult, type ScriptExecutor, type RequestInfo, type EachOptions, type EachSummary } from "./script.ts";
 export { subscribe, type SubscribeOptions, type SubscriptionEvent } from "./subscribe.ts";
-export { EmbeddingIndex, VenuEmbedder, embeddingIndexPath, type Embedder, type BuildIndexOptions, type SearchResults, type OperationMatch, type TypeMatch, type VenuEmbedderOptions } from "./embed.ts";
 export * from "./types.ts";

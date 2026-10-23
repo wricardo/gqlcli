@@ -7,26 +7,29 @@ import {
   isInputObjectType,
   isInterfaceType,
   isObjectType,
-  isScalarType,
+  isAbstractType,
   isUnionType,
   parse,
   printSchema,
   validate,
-  type GraphQLField,
   type GraphQLNamedType,
+  type GraphQLObjectType,
   type GraphQLSchema,
   type IntrospectionQuery,
 } from "graphql";
 import type { GraphQLClient, RequestOptions } from "./client.ts";
 import {
-  distancesTo,
+  fieldScore,
   fieldSignature,
-  fieldsReferencing,
-  operationsReferencing,
+  formatTypeSDL,
+  isBuiltInScalar,
   printTypeCompact,
-  referencedTypeNames,
+  targetDistances,
+  typeDef,
+  viewField,
+  type FieldView,
   type PrintOptions,
-  type RootFields,
+  type TypeDef,
 } from "./typeprint.ts";
 import type { GraphQLResponse } from "./types.ts";
 
@@ -40,7 +43,7 @@ export interface OperationInfo {
 export interface OperationListOptions extends PrintOptions {
   /** Case-insensitive substring on the field name. */
   filter?: string;
-  /** Also return SDL for the referenced arg/return types, this many hops deep. */
+  /** Also return SDL for the referenced arg/return types, this many levels deep. */
   depth?: number;
 }
 
@@ -54,6 +57,8 @@ export interface TypeInfo {
 export interface TypeListOptions extends PrintOptions {
   /** Case-insensitive substring on the type name. */
   filter?: string;
+  /** Include each type's compact SDL (implied by `args` or `desc`). */
+  sdl?: boolean;
   /** OBJECT, ENUM, INPUT_OBJECT, SCALAR, INTERFACE or UNION. */
   kind?: string;
 }
@@ -92,7 +97,7 @@ function kindOf(t: GraphQLNamedType): string {
 /** Schema exploration over a built schema: list, describe, SDL, validate. Pure and offline once constructed. */
 export class SchemaExplorer {
   readonly schema: GraphQLSchema;
-  readonly roots: RootFields;
+  readonly roots: { query?: GraphQLObjectType | null; mutation?: GraphQLObjectType | null; subscription?: GraphQLObjectType | null };
 
   constructor(schema: GraphQLSchema) {
     this.schema = schema;
@@ -132,14 +137,16 @@ export class SchemaExplorer {
     const depth = o.depth ?? 0;
     if (depth < 1) return { operations };
     const seen = new Set<string>();
-    const blocks: string[] = [];
-    for (const f of fields) {
-      this.collectReferenced([getNamedType(f.type)!.name, ...f.args.map((a) => getNamedType(a.type)!.name)], depth, seen, blocks, { args: o.args ?? false, desc: o.desc ?? false });
+    let sdl = "";
+    const names = new Set(fields.flatMap((f) => [getNamedType(f.type).name, ...f.args.map((a) => getNamedType(a.type).name)]));
+    for (const name of [...names].sort()) {
+      if (isBuiltInScalar(name)) continue;
+      sdl += this.appendTypeRecursive(name, { args: o.args ?? false, desc: o.desc ?? false }, depth - 1, seen);
     }
-    return { operations, ...(blocks.length ? { types: blocks.join("\n\n") } : {}) };
+    return { operations, ...(sdl ? { types: sdl } : {}) };
   }
 
-  /** `gqlcli types`. */
+  /** `gqlcli types`. Includes deprecated members, like the Go listing. */
   types(o: TypeListOptions = {}): TypeInfo[] {
     const needle = o.filter?.toLowerCase();
     const kind = o.kind?.toUpperCase();
@@ -150,59 +157,38 @@ export class SchemaExplorer {
         name: t.name,
         kind: kindOf(t),
         ...(t.description ? { description: t.description } : {}),
-        ...(o.args || o.desc ? { sdl: printTypeCompact(t, o) } : {}),
+        ...(o.sdl || o.args || o.desc ? { sdl: printTypeCompact(t, o, true) } : {}),
       }));
   }
 
-  /** `gqlcli describe Type` or `Type.field`. */
+  /**
+   * `gqlcli describe Type` or `Type.field`, in the Go CLI's compact format: fields sorted by type then name,
+   * same-typed fields collapsed, `depth` expanding referenced types and appending the operations and schema fields
+   * that reference the type.
+   */
   describe(name: string, o: DescribeOptions = {}): string {
-    const depth = o.depth ?? 0;
-    const pOpts: PrintOptions = { args: o.args ?? false, desc: o.desc ?? false };
+    const depth = Math.max(0, o.depth ?? 0);
+    const maxOps = Math.max(0, o.maxOpRefs ?? 5);
+    const maxFields = Math.max(0, o.maxFieldRefs ?? 5);
+    const p: PrintOptions = { args: o.args ?? false, desc: o.desc ?? false };
+
     const dot = name.indexOf(".");
-    if (dot > 0) return this.describeField(name.slice(0, dot), name.slice(dot + 1), depth, pOpts);
+    const selector = dot > 0 && dot < name.length - 1 && !name.includes(".", dot + 1) ? { type: name.slice(0, dot), field: name.slice(dot + 1) } : undefined;
+    const rootName = selector?.type ?? name;
+    const type = this.requireType(rootName);
 
-    const type = this.requireType(name);
-    const blocks = [printTypeCompact(type, pOpts)];
-    const seen = new Set<string>([type.name]);
-    this.collectReferenced(referencedTypeNames(type), depth, seen, blocks, pOpts);
-    if (depth < 1) return blocks.join("\n\n");
-
-    const rootNames = [this.roots.query, this.roots.mutation, this.roots.subscription].filter(Boolean).map((t) => t!.name);
-    if (rootNames.includes(type.name)) return blocks.join("\n\n");
-
-    const ops = operationsReferencing(this.schema, this.roots, type.name, depth);
-    const maxOps = o.maxOpRefs ?? 5;
-    const shownOps = maxOps > 0 ? ops.slice(0, maxOps) : ops;
-    if (shownOps.length) {
-      const count = shownOps.length < ops.length ? ` (showing ${shownOps.length} of ${ops.length})` : "";
-      const byRoot: Record<string, string[]> = {};
-      for (const m of shownOps) (byRoot[m.root] ??= []).push(`  ${fieldSignature(m.field, true)}`);
-      blocks.push(`# Operations referencing ${type.name}${count}`, ...Object.entries(byRoot).map(([root, lines]) => `type ${root} {\n${lines.join("\n")}\n}`));
+    const seen = new Set<string>();
+    let out: string;
+    if (selector) {
+      if (!(isObjectType(type) || isInterfaceType(type))) throw new Error(`field "${selector.field}" not found on type "${type.name}"`);
+      const field = Object.values(type.getFields()).find((f) => f.name === selector.field && !f.deprecationReason);
+      if (!field) throw new Error(`field "${selector.field}" not found on type "${type.name}"`);
+      out = this.appendDef({ ...typeDef(type), fields: [viewField(field)] }, p, depth, seen);
+    } else {
+      out = this.appendTypeRecursive(type.name, p, depth, seen);
     }
-
-    const holders = fieldsReferencing(this.schema, this.roots, type.name, depth);
-    const maxFields = o.maxFieldRefs ?? 5;
-    const shownHolders = maxFields > 0 ? holders.slice(0, maxFields) : holders;
-    if (shownHolders.length) {
-      const dist = distancesTo(this.schema, type.name, Math.max(depth - 1, 0));
-      const count = shownHolders.length < holders.length ? ` (showing ${shownHolders.length} of ${holders.length})` : "";
-      blocks.push(`# Schema fields referencing ${type.name}${count}`);
-      for (const h of shownHolders) {
-        if (!(isObjectType(h) || isInterfaceType(h) || isInputObjectType(h))) continue;
-        if (isInputObjectType(h)) {
-          const lines = Object.values(h.getFields())
-            .filter((f) => dist[getNamedType(f.type)!.name] !== undefined)
-            .map((f) => `  ${f.name}: ${String(f.type)}`);
-          blocks.push(`input ${h.name} {\n${lines.join("\n")}\n}`);
-          continue;
-        }
-        const lines = Object.values(h.getFields())
-          .filter((f) => dist[getNamedType(f.type)!.name] !== undefined || f.args.some((a) => dist[getNamedType(a.type)!.name] !== undefined))
-          .map((f) => `  ${fieldSignature(f, pOpts.args)}`);
-        blocks.push(`${isObjectType(h) ? "type" : "interface"} ${h.name} {\n${lines.join("\n")}\n}`);
-      }
-    }
-    return blocks.join("\n\n");
+    if (depth >= 1) out += this.referencingOperations(rootName, depth, maxOps, p) + this.referencingFields(rootName, depth, maxFields, p);
+    return out;
   }
 
   /** The whole schema as SDL; builtin scalars/directives omitted, loadable by {@link fromSDL}. */
@@ -239,36 +225,78 @@ export class SchemaExplorer {
     if (t) return t;
     const needle = name.toLowerCase();
     const near = Object.keys(this.schema.getTypeMap()).filter((n) => !n.startsWith("__") && n.toLowerCase().includes(needle)).slice(0, 10);
-    throw new Error(`type "${name}" not found${near.length ? `; similar: ${near.join(", ")}` : ""}`);
+    throw new Error(`type "${name}" not found in schema${near.length ? `; similar: ${near.join(", ")}` : ""}`);
   }
 
-  private describeField(typeName: string, fieldName: string, depth: number, p: PrintOptions): string {
-    const type = this.requireType(typeName);
-    if (!(isObjectType(type) || isInterfaceType(type))) throw new Error(`type "${typeName}" has no fields to describe`);
-    const field = type.getFields()[fieldName];
-    if (!field) {
-      const near = Object.keys(type.getFields()).filter((n) => n.toLowerCase().includes(fieldName.toLowerCase())).slice(0, 10);
-      throw new Error(`field "${fieldName}" not found on ${typeName}${near.length ? `; similar: ${near.join(", ")}` : ""}`);
+  /** Prints a definition, then (depth-first, names sorted) the types it references with one less level of depth. */
+  private appendDef(def: TypeDef, p: PrintOptions, depth: number, seen: Set<string>): string {
+    if (!def.name || seen.has(def.name) || def.name.startsWith("__")) return "";
+    seen.add(def.name);
+    let out = formatTypeSDL(def, p.args ?? false, !(p.desc ?? false));
+    if (depth === 0) return out;
+    const names = new Set<string>();
+    for (const f of def.fields ?? []) {
+      names.add(f.type.replaceAll(/[[\]!]/g, ""));
+      for (const a of f.args) names.add(a.type.replaceAll(/[[\]!]/g, ""));
     }
-    const doc = p.desc && field.description ? `  # ${field.description.trim().replaceAll("\n", "\n  # ")}\n` : "";
-    const blocks = [`type ${typeName} {\n${doc}  ${fieldSignature(field, true)}\n}`];
-    this.collectReferenced([getNamedType(field.type)!.name, ...field.args.map((a) => getNamedType(a.type)!.name)], depth, new Set([typeName]), blocks, p);
-    return blocks.join("\n\n");
+    const type = this.schema.getType(def.name);
+    const possible = type && isAbstractType(type) ? this.schema.getPossibleTypes(type).map((t) => t.name) : [];
+    for (const n of [...names, ...possible].sort()) {
+      if (seen.has(n) || isBuiltInScalar(n) || n.startsWith("__")) continue;
+      out += this.appendTypeRecursive(n, p, depth - 1, seen);
+    }
+    return out;
   }
 
-  /** Breadth-first expansion of named types into SDL blocks; scalars are skipped. */
-  private collectReferenced(roots: string[], depth: number, seen: Set<string>, blocks: string[], p: PrintOptions): void {
-    let frontier = roots;
-    for (let hop = 0; hop < depth && frontier.length; hop++) {
-      const next: string[] = [];
-      for (const n of frontier) {
-        const t = this.schema.getType(n);
-        if (!t || seen.has(n) || n.startsWith("__") || isScalarType(t)) continue;
-        seen.add(n);
-        blocks.push(printTypeCompact(t, p));
-        next.push(...referencedTypeNames(t));
-      }
-      frontier = next;
+  private appendTypeRecursive(name: string, p: PrintOptions, depth: number, seen: Set<string>): string {
+    const t = this.schema.getType(name);
+    return t ? this.appendDef(typeDef(t), p, depth, seen) : "";
+  }
+
+  /** `# Referenced by top-level operations`: query then mutation fields that use the type, args first then nearest. */
+  private referencingOperations(target: string, depth: number, maxRefs: number, p: PrintOptions): string {
+    const { query, mutation, subscription } = this.roots;
+    if (target.startsWith("__") || [query, mutation, subscription].some((r) => r?.name === target)) return "";
+    const dist = targetDistances(this.schema, target, depth);
+    const sections: string[] = [];
+    let remaining = maxRefs;
+    let total = 0;
+    let shown = 0;
+    for (const root of [query, mutation]) {
+      if (!root) continue;
+      const matches = Object.values(root.getFields())
+        .filter((f) => !f.deprecationReason)
+        .map((f) => ({ view: viewField(f), score: fieldScore(viewField(f), target, dist) }))
+        .filter((m): m is { view: FieldView; score: NonNullable<typeof m.score> } => m.score !== undefined)
+        .sort((a, b) => a.score.locationRank - b.score.locationRank || a.score.depth - b.score.depth || (a.view.name < b.view.name ? -1 : a.view.name > b.view.name ? 1 : 0));
+      total += matches.length;
+      const limited = maxRefs > 0 && matches.length > remaining ? matches.slice(0, remaining) : matches;
+      if (limited.length === 0) continue;
+      shown += limited.length;
+      if (remaining > 0) remaining -= limited.length;
+      sections.push(formatTypeSDL({ name: root.name, kind: "OBJECT", fields: limited.map((m) => m.view), preserveFieldOrder: true }, true, !(p.desc ?? false)));
+      if (remaining === 0 && maxRefs > 0) break;
     }
+    if (sections.length === 0) return "";
+    return `\n# Referenced by top-level operations${total > shown ? ` (showing ${shown} of ${total})` : ""}\n${sections.join("")}`;
+  }
+
+  /** `# Referenced by fields`: non-root object/interface types having a field whose args or type reach the target. */
+  private referencingFields(target: string, depth: number, maxRefs: number, p: PrintOptions): string {
+    if (target.startsWith("__")) return "";
+    const rootNames = Object.values(this.roots).filter((r) => r).map((r) => r!.name);
+    const dist = targetDistances(this.schema, target, depth);
+    let sections: { name: string; sdl: string }[] = [];
+    for (const t of Object.values(this.schema.getTypeMap())) {
+      if (t.name.startsWith("__") || rootNames.includes(t.name) || !(isObjectType(t) || isInterfaceType(t))) continue;
+      const def = typeDef(t);
+      const fields = (def.fields ?? []).filter((f) => fieldScore(f, target, dist) !== undefined);
+      if (fields.length > 0) sections.push({ name: t.name, sdl: formatTypeSDL({ ...def, fields }, true, !(p.desc ?? false)) });
+    }
+    if (sections.length === 0) return "";
+    const total = sections.length;
+    sections = sections.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    if (maxRefs > 0 && sections.length > maxRefs) sections = sections.slice(0, maxRefs);
+    return `\n# Referenced by fields${total > sections.length ? ` (showing ${sections.length} of ${total})` : ""}\n${sections.map((s) => s.sdl).join("")}`;
   }
 }

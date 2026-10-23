@@ -24,8 +24,6 @@ export interface GqlcliToolsOptions {
   scriptMaxOperations?: number;
   /** Wall-clock cap per script run. Default 60s. */
   scriptTimeoutMs?: number;
-  /** Include `search` (semantic embeddings). Default: true when VENU_API_KEY is set or an embedder was passed. */
-  search?: boolean;
 }
 
 type Out = ToolExecutionResult;
@@ -36,7 +34,7 @@ const fail = (text: string): Out => ({ isError: true, output: [{ type: "text", t
 const Format = Type.Optional(Type.Union(OUTPUT_FORMATS.map((f) => Type.Literal(f)), { description: "Output encoding override" }));
 const Vars = Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "GraphQL variables" }));
 
-/** Tools mirroring the gqlcli commands: explore (queries, mutations, types, describe, sdl, validate, search), run (query, batch, subscribe, script, mutation). */
+/** Tools mirroring the gqlcli commands: explore (queries, mutations, types, describe, sdl, validate), run (query, batch, subscribe, script, mutation). */
 export function createGqlcliTools(opts: GqlcliToolsOptions = {}): ToolRegistration[] {
   const p = opts.prefix ?? "gql_";
   const allowMutations = opts.mutations ?? false;
@@ -277,6 +275,7 @@ export function createGqlcliTools(opts: GqlcliToolsOptions = {}): ToolRegistrati
       source: Type.Optional(Type.String({ description: "Script source defining the entry function" })),
       name: Type.Optional(Type.String({ description: "Saved script from .gqlcli.json (instead of source)" })),
       functionName: Type.Optional(Type.String({ description: "Default: run" })),
+      strict: Type.Optional(Type.Boolean({ description: "Default true: a response with GraphQL errors makes gql.query/mutation throw. false returns it for the script to inspect." })),
       input: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
       format: Format,
     }),
@@ -289,6 +288,7 @@ export function createGqlcliTools(opts: GqlcliToolsOptions = {}): ToolRegistrati
           {
             ...(a.input ? { input: a.input as JsonObject } : {}),
             readOnly: !allowMutations,
+            ...(a.strict !== undefined ? { strict: a.strict } : {}),
             maxOperations: opts.scriptMaxOperations ?? 50,
             timeoutMs: opts.scriptTimeoutMs ?? 60_000,
             ...(ctx.abortSignal ? { signal: ctx.abortSignal } : {}),
@@ -299,31 +299,12 @@ export function createGqlcliTools(opts: GqlcliToolsOptions = {}): ToolRegistrati
       }),
   });
 
-  const search = defineTool({
-    name: `${p}search`,
-    description: "Find queries, mutations and types by meaning when you do not know their names. Needs an embedding index (built with the embed index command or Gqlcli.embedIndex). Returns the top matches of each category with SDL.",
-    parameters: Type.Object({
-      query: Type.String({ description: "Plain-language description of what you want to do" }),
-      top: Type.Optional(Type.Integer({ minimum: 1, maximum: 25, description: "Matches per category; default 5" })),
-      category: Type.Optional(Type.Union([Type.Literal("queries"), Type.Literal("mutations"), Type.Literal("types")])),
-      format: Format,
-    }),
-    replay: "safe",
-    execute: (a, _api, ctx) =>
-      guard(async () => {
-        const r = await g().embedSearch(a.query, a.top ?? 5, ctx.abortSignal ? { signal: ctx.abortSignal } : {});
-        return ok(fmt(a.category ? { [a.category]: r[a.category] } : r, a.format));
-      }),
-  });
-
-  const wantSearch = opts.search ?? (!!process.env["VENU_API_KEY"] || (typeof opts.gqlcli === "object" && opts.gqlcli !== null && "embedder" in opts.gqlcli));
   const list: ToolRegistration[] = [queries, mutationsList, types, describe, sdl, validate, query, batch, subscribeTool, script];
   if (allowMutations) list.push(mutation);
-  if (wantSearch) list.push(search);
-  return list as ToolRegistration[];
+  return list;
 }
 
-const GUIDE = `You can explore and call a GraphQL API with the gql_* tools. Workflow: discover (queries/mutations/types, or search by meaning) -> describe an operation with args and depth=1 -> validate -> execute with a jq filter to keep output small. Prefer batch for independent queries and script for loops or dependent calls.`;
+const GUIDE = `You can explore and call a GraphQL API with the gql_* tools. Workflow: discover (queries/mutations/types) -> describe an operation with args and depth=1 -> validate -> execute with a jq filter to keep output small. Prefer batch for independent queries and script for loops or dependent calls.`;
 
 /** Extension bundling the tools plus a short usage section for the system prompt. Install with `registry.install(gqlcliExtension({...}))`. */
 export function gqlcliExtension(opts: GqlcliToolsOptions & { name?: string } = {}): Extension {

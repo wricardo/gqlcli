@@ -15,7 +15,6 @@ export interface EnvConfig {
   url: string;
   headers?: Record<string, string>;
   login?: EnvLoginConfig;
-  embeddings?: string;
 }
 
 export interface NamedOperation {

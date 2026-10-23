@@ -41,7 +41,7 @@ export class GraphQLResponseError extends Error {
   readonly response: GraphQLResponse;
   constructor(response: GraphQLResponse) {
     const first = response.errors?.[0]?.message ?? "GraphQL errors";
-    super(`GraphQL error: ${first}`);
+    super(`GraphQL errors in response: ${first}`);
     this.name = "GraphQLResponseError";
     this.response = response;
   }

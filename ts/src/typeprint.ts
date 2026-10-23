@@ -1,18 +1,15 @@
 import {
-  astFromValue,
   getNamedType,
   isEnumType,
   isInputObjectType,
   isInterfaceType,
   isObjectType,
   isScalarType,
+  isAbstractType,
   isUnionType,
-  print,
   type GraphQLArgument,
   type GraphQLField,
-  type GraphQLInputField,
   type GraphQLNamedType,
-  type GraphQLObjectType,
   type GraphQLSchema,
 } from "graphql";
 
@@ -23,106 +20,145 @@ export interface PrintOptions {
   desc?: boolean;
 }
 
-type DefaultInput = { value?: unknown; literal?: Parameters<typeof print>[0] } | undefined;
+/** Field of an object/interface/input type, reduced to what the compact SDL shows. */
+export interface FieldView {
+  name: string;
+  description?: string | null;
+  type: string;
+  args: { name: string; type: string }[];
+}
 
-function defaultSuffix(item: GraphQLArgument | GraphQLInputField): string {
-  const d = item.default as DefaultInput;
-  if (!d) return "";
-  const node = d.literal ?? astFromValue(d.value, item.type);
-  return node ? ` = ${print(node)}` : "";
+export interface TypeDef {
+  name: string;
+  kind: "SCALAR" | "OBJECT" | "INTERFACE" | "UNION" | "ENUM" | "INPUT_OBJECT";
+  description?: string | null;
+  enumValues?: string[];
+  fields?: FieldView[];
+  /** Keep `fields` in the given order instead of sorting by type then name (used for operation sections). */
+  preserveFieldOrder?: boolean;
+}
+
+const BUILTIN_SCALARS = ["String", "Int", "Float", "Boolean", "ID"];
+
+export function isBuiltInScalar(name: string): boolean {
+  return BUILTIN_SCALARS.includes(name);
 }
 
 function argList(args: readonly GraphQLArgument[]): string {
-  return args.length === 0 ? "" : `(${args.map((a) => `${a.name}: ${String(a.type)}${defaultSuffix(a)}`).join(", ")})`;
+  return args.length === 0 ? "" : `(${args.map((a) => `${a.name}: ${String(a.type)}`).join(", ")})`;
 }
 
-/** `name(arg: T = d): Ret @deprecated` for one object/interface field. */
+/** `name(arg: T): Ret` for one object/interface field, for operation listings. */
 export function fieldSignature(f: GraphQLField, withArgs = true): string {
-  const dep = f.deprecationReason ? " @deprecated" : "";
-  return `${f.name}${withArgs ? argList(f.args) : ""}: ${String(f.type)}${dep}`;
+  return `${f.name}${withArgs ? argList(f.args) : ""}: ${String(f.type)}${f.deprecationReason ? " @deprecated" : ""}`;
 }
 
-function comment(text: string | null | undefined, indent: string): string {
-  return text ? text.trim().split("\n").map((l) => `${indent}# ${l}`).join("\n") + "\n" : "";
+function kindOf(t: GraphQLNamedType): TypeDef["kind"] {
+  if (isObjectType(t)) return "OBJECT";
+  if (isInterfaceType(t)) return "INTERFACE";
+  if (isInputObjectType(t)) return "INPUT_OBJECT";
+  if (isEnumType(t)) return "ENUM";
+  if (isUnionType(t)) return "UNION";
+  return "SCALAR";
 }
 
-/** Compact SDL for one named type; omits builtin noise and (by default) args and descriptions. */
-export function printTypeCompact(type: GraphQLNamedType, o: PrintOptions = {}): string {
-  const head = o.desc ? comment(type.description, "") : "";
-  if (isScalarType(type)) return `${head}scalar ${type.name}`;
-  if (isEnumType(type)) {
-    const vals = type.getValues().map((v) => `${comment(o.desc ? v.description : undefined, "  ")}  ${v.name}${v.deprecationReason ? " @deprecated" : ""}`);
-    return `${head}enum ${type.name} {\n${vals.join("\n")}\n}`;
-  }
-  if (isUnionType(type)) return `${head}union ${type.name} = ${type.getTypes().map(String).join(" | ")}`;
-  if (isInputObjectType(type)) {
-    const fields = Object.values(type.getFields()).map((f) => `${comment(o.desc ? f.description : undefined, "  ")}  ${f.name}: ${String(f.type)}${defaultSuffix(f)}`);
-    return `${head}input ${type.name}${type.isOneOf ? " @oneOf" : ""} {\n${fields.join("\n")}\n}`;
-  }
-  if (isObjectType(type) || isInterfaceType(type)) {
-    const kw = isObjectType(type) ? "type" : "interface";
-    const impl = type.getInterfaces().length ? ` implements ${type.getInterfaces().map(String).join(" & ")}` : "";
-    const fields = Object.values(type.getFields()).map((f) => `${comment(o.desc ? f.description : undefined, "  ")}  ${fieldSignature(f, o.args)}`);
-    return `${head}${kw} ${type.name}${impl} {\n${fields.join("\n")}\n}`;
-  }
-  throw new Error(`cannot print type ${String(type)}`);
-}
-
-/** Named, non-scalar types referenced by a type's fields, args, union members and interfaces. */
-export function referencedTypeNames(type: GraphQLNamedType): string[] {
-  const names = new Set<string>();
-  const add = (t: Parameters<typeof getNamedType>[0]) => {
-    const n = getNamedType(t);
-    if (n && !isScalarType(n)) names.add(n.name);
-  };
-  if (isUnionType(type)) type.getTypes().forEach(add);
-  if (isObjectType(type) || isInterfaceType(type)) {
-    type.getInterfaces().forEach(add);
-    for (const f of Object.values(type.getFields())) {
-      add(f.type);
-      f.args.forEach((a) => add(a.type));
-    }
-  }
-  if (isInputObjectType(type)) Object.values(type.getFields()).forEach((f) => add(f.type));
-  names.delete(type.name);
-  return [...names];
-}
-
-export interface RootFields {
-  query?: GraphQLObjectType | null;
-  mutation?: GraphQLObjectType | null;
-  subscription?: GraphQLObjectType | null;
-}
-
-/** Types referenced (directly) by an operation field: its return type and arg types, excluding scalars. */
-function fieldRefs(f: GraphQLField): { ret?: string; args: string[] } {
-  const ret = getNamedType(f.type);
-  return {
-    ...(ret && !isScalarType(ret) ? { ret: ret.name } : {}),
-    args: f.args.map((a) => getNamedType(a.type)).filter((t) => t && !isScalarType(t)).map((t) => t!.name),
-  };
+export function viewField(f: GraphQLField): FieldView {
+  return { name: f.name, description: f.description, type: String(f.type), args: f.args.map((a) => ({ name: a.name, type: String(a.type) })) };
 }
 
 /**
- * Reverse distance from every type to `target` in the "references" graph: target is 0, a type with a field or arg
- * naming target is 1, and so on, up to `maxHops`.
+ * Definition of a named type as `describe` shows it. Deprecated fields and enum values are omitted unless
+ * `includeDeprecated`, as the Go CLI's `describe` does while its `types` listing keeps them.
  */
-export function distancesTo(schema: GraphQLSchema, target: string, maxHops: number): Record<string, number> {
-  const referencedBy: Record<string, string[]> = {};
+export function typeDef(type: GraphQLNamedType, includeDeprecated = false): TypeDef {
+  const def: TypeDef = { name: type.name, kind: kindOf(type), description: type.description };
+  if (isEnumType(type)) def.enumValues = type.getValues().filter((v) => includeDeprecated || !v.deprecationReason).map((v) => v.name);
+  if (isObjectType(type) || isInterfaceType(type)) {
+    def.fields = Object.values(type.getFields()).filter((f) => includeDeprecated || !f.deprecationReason).map(viewField);
+  }
+  if (isInputObjectType(type)) {
+    def.fields = Object.values(type.getFields()).map((f) => ({ name: f.name, description: f.description, type: String(f.type), args: [] }));
+  }
+  return def;
+}
+
+function formatField(f: FieldView, showArgs: boolean, showDescriptions: boolean): string {
+  let out = "";
+  if (showDescriptions && f.description) {
+    out += f.description.includes("\n") ? `  """\n${f.description.split("\n").map((l) => `  ${l}\n`).join("")}  """\n` : `  # ${f.description}\n`;
+  }
+  if (showArgs && f.args.length > 0) return `${out}  ${f.name}(${f.args.map((a) => `${a.name}: ${a.type}`).join(", ")}): ${f.type}\n`;
+  return `${out}  ${f.name}: ${f.type}\n`;
+}
+
+const KEYWORDS: Record<TypeDef["kind"], string> = { OBJECT: "type", INPUT_OBJECT: "input", INTERFACE: "interface", UNION: "union", ENUM: "enum", SCALAR: "scalar" };
+
+/**
+ * The Go CLI's compact SDL: fields sorted by type then name, consecutive same-typed plain fields collapsed to
+ * `a, b: T`, enums on one line, each block newline-terminated. Unions print an empty body, exactly as Go does.
+ */
+export function formatTypeSDL(def: TypeDef, showArgs: boolean, noDescriptions: boolean): string {
+  let out = !noDescriptions && def.description ? `# ${def.description}\n` : "";
+  if (def.kind === "SCALAR") return `${out}scalar ${def.name}\n`;
+  if (def.kind === "ENUM") return `${out}enum ${def.name} { ${(def.enumValues ?? []).join(" ")} }\n`;
+  out += `${KEYWORDS[def.kind]} ${def.name} {\n`;
+  const fields = def.fields ?? [];
+  const sorted = def.preserveFieldOrder ? fields : [...fields].sort((a, b) => (a.type !== b.type ? (a.type < b.type ? -1 : 1) : a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const own = (f: FieldView) => (!noDescriptions && !!f.description) || (showArgs && f.args.length > 0);
+  for (let i = 0; i < sorted.length; ) {
+    const f = sorted[i]!;
+    if (own(f)) {
+      out += formatField(f, showArgs, !noDescriptions);
+      i++;
+      continue;
+    }
+    let j = i + 1;
+    while (j < sorted.length && sorted[j]!.type === f.type && !own(sorted[j]!)) j++;
+    out += j - i === 1 ? formatField(f, showArgs, !noDescriptions) : `  ${sorted.slice(i, j).map((g) => g.name).join(", ")}: ${f.type}\n`;
+    i = j;
+  }
+  return `${out}}\n`;
+}
+
+/** Compact SDL of one named type. */
+export function printTypeCompact(type: GraphQLNamedType, o: PrintOptions = {}, includeDeprecated = false): string {
+  return formatTypeSDL(typeDef(type, includeDeprecated), o.args ?? false, !(o.desc ?? false));
+}
+
+/** Names a type's (non-deprecated) fields, args, input fields and possible types (union members, implementers) point at, sorted. */
+export function referencedTypeNames(type: GraphQLNamedType, schema: GraphQLSchema): string[] {
+  const names = new Set<string>();
+  if (isAbstractType(type)) for (const t of schema.getPossibleTypes(type)) names.add(t.name);
+  if (isObjectType(type) || isInterfaceType(type)) {
+    for (const f of Object.values(type.getFields())) {
+      if (f.deprecationReason) continue;
+      names.add(getNamedType(f.type).name);
+      for (const a of f.args) names.add(getNamedType(a.type).name);
+    }
+  }
+  if (isInputObjectType(type)) for (const f of Object.values(type.getFields())) names.add(getNamedType(f.type).name);
+  return [...names].sort();
+}
+
+/**
+ * Hop distance from every type to `target` through the reverse reference graph, up to `depth` hops (target = 0).
+ * Builtin scalars and introspection types never act as referrers.
+ */
+export function targetDistances(schema: GraphQLSchema, target: string, depth: number): Record<string, number> {
+  const reverse: Record<string, string[]> = {};
   for (const t of Object.values(schema.getTypeMap())) {
-    if (t.name.startsWith("__")) continue;
-    for (const r of referencedTypeNames(t)) (referencedBy[r] ??= []).push(t.name);
+    if (t.name.startsWith("__") || (isScalarType(t) && isBuiltInScalar(t.name))) continue;
+    for (const dep of referencedTypeNames(t, schema)) (reverse[dep] ??= []).push(t.name);
   }
   const dist: Record<string, number> = { [target]: 0 };
   let frontier = [target];
-  for (let hop = 1; hop <= maxHops && frontier.length; hop++) {
+  for (let hops = 1; hops <= depth && frontier.length > 0; hops++) {
     const next: string[] = [];
-    for (const n of frontier) {
-      for (const parent of referencedBy[n] ?? []) {
-        if (!(parent in dist)) {
-          dist[parent] = hop;
-          next.push(parent);
-        }
+    for (const name of frontier) {
+      for (const referrer of reverse[name] ?? []) {
+        if (referrer in dist) continue;
+        dist[referrer] = hops;
+        next.push(referrer);
       }
     }
     frontier = next;
@@ -130,38 +166,18 @@ export function distancesTo(schema: GraphQLSchema, target: string, maxHops: numb
   return dist;
 }
 
-export interface OperationMatch {
-  root: "Query" | "Mutation" | "Subscription";
-  field: GraphQLField;
-  argMatch: boolean;
-  distance: number;
+export interface FieldScore {
+  /** 0: an argument reaches the target; 1: only the return type does. */
+  locationRank: number;
+  depth: number;
 }
 
-/** Root operations whose args or return type reach `target` within `depth` hops; args first, then nearest return type. */
-export function operationsReferencing(schema: GraphQLSchema, roots: RootFields, target: string, depth: number): OperationMatch[] {
-  const dist = distancesTo(schema, target, Math.max(depth - 1, 0));
-  const out: OperationMatch[] = [];
-  const rootList: [OperationMatch["root"], GraphQLObjectType | null | undefined][] = [["Query", roots.query], ["Mutation", roots.mutation], ["Subscription", roots.subscription]];
-  for (const [root, type] of rootList) {
-    if (!type) continue;
-    for (const field of Object.values(type.getFields())) {
-      const refs = fieldRefs(field);
-      const argDists = refs.args.map((n) => dist[n]).filter((d): d is number => d !== undefined);
-      const retDist = refs.ret !== undefined ? dist[refs.ret] : undefined;
-      const best = Math.min(...argDists, retDist ?? Infinity);
-      if (best === Infinity) continue;
-      out.push({ root, field, argMatch: argDists.length > 0, distance: retDist ?? best });
-    }
-  }
-  return out.sort((a, b) => Number(b.argMatch) - Number(a.argMatch) || a.distance - b.distance || a.field.name.localeCompare(b.field.name));
-}
-
-/** Non-root object/interface/input types with a field that references `target` within `depth` hops. */
-export function fieldsReferencing(schema: GraphQLSchema, roots: RootFields, target: string, depth: number): GraphQLNamedType[] {
-  const dist = distancesTo(schema, target, Math.max(depth - 1, 0));
-  const rootNames = [roots.query, roots.mutation, roots.subscription].filter(Boolean).map((t) => t!.name);
-  return Object.values(schema.getTypeMap())
-    .filter((t) => !t.name.startsWith("__") && t.name !== target && !rootNames.includes(t.name) && (isObjectType(t) || isInterfaceType(t) || isInputObjectType(t)))
-    .filter((t) => referencedTypeNames(t).some((r) => dist[r] !== undefined))
-    .sort((a, b) => a.name.localeCompare(b.name));
+/** Whether (and how near) a field's args or return type reach the target; args win over the return type. */
+export function fieldScore(f: FieldView, target: string, dist: Record<string, number>): FieldScore | undefined {
+  const baseName = (ref: string) => ref.replaceAll(/[[\]!]/g, "");
+  const hops = (ref: string) => (baseName(ref) === target ? 0 : dist[baseName(ref)]);
+  const argDepths = f.args.map((a) => hops(a.type)).filter((d): d is number => d !== undefined);
+  if (argDepths.length > 0) return { locationRank: 0, depth: Math.min(...argDepths) };
+  const ret = hops(f.type);
+  return ret === undefined ? undefined : { locationRank: 1, depth: ret };
 }

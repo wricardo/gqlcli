@@ -106,18 +106,13 @@ describe("execution", () => {
 });
 
 describe("schema exploration", () => {
-  test("operations, types, describe, depth and references", async () => {
+  test("operations, types and compact describe (byte parity with Go is covered by parity.test.ts)", async () => {
     const ex = await make().schema();
     assert.deepEqual(ex.operations("query", { filter: "user", args: true }).operations.map((o) => o.signature), ["users(active: Boolean): [User!]!", "user(id: ID!): User"]);
     assert.deepEqual(ex.types({ kind: "ENUM" }).map((t) => t.name), ["Role"]);
-    assert.equal(ex.describe("User"), "type User {\n  id: ID!\n  name: String!\n  active: Boolean!\n  posts: [Post!]!\n}");
-    const deep = ex.describe("User", { depth: 1, args: true });
-    assert.match(deep, /type Post \{/);
-    assert.match(deep, /# Operations referencing User/);
-    assert.match(deep, /createUser\(input: CreateUserInput!\): User!/);
-    assert.match(deep, /# Schema fields referencing User\n[\s\S]*type Post \{\n  author: User!/);
-    assert.equal(ex.describe("Query.user"), "type Query {\n  user(id: ID!): User\n}");
-    assert.throws(() => ex.describe("Usr"), /similar|not found/);
+    assert.equal(ex.describe("User"), "type User {\n  active: Boolean!\n  id: ID!\n  name: String!\n  posts: [Post!]!\n}\n");
+    assert.equal(ex.describe("Query.user"), "type Query {\n  user: User\n}\n");
+    assert.throws(() => ex.describe("Usr"), /type "Usr" not found in schema/);
   });
 
   test("validate gives line:column and schema hint; sdl round-trips offline", async () => {
@@ -175,11 +170,11 @@ describe("script", () => {
           const res = await gql.query("query($id: ID!){ user(id:$id){ name } }", { id });
           if (!res.data.user) throw new Error("missing " + id);
           names.push(res.data.user.name);
-        }, { concurrency: 2 });
+        }, { concurrency: 2, stopOnError: false });
         return { names: names.sort(), summary };
       }`,
     });
-    assert.deepEqual(r.result, { names: ["Ada", "Bob"], summary: { total: 3, success: 2, failed: 1, errors: [{ index: 2, error: "missing 3" }] } });
+    assert.deepEqual(r.result, { names: ["Ada", "Bob"], summary: { total: 3, success: 2, failed: 1, errors: [{ index: 2, error: "Error: missing 3" }] } });
     assert.deepEqual(r.logs, ["start 3"]);
     assert.equal(r.operations, 3);
   });

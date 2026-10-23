@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { executeBatch, type BatchOptions } from "./batch.ts";
 import { GraphQLClient, type ClientOptions, type RequestOptions } from "./client.ts";
 import { loadProjectConfig, mergeVariables, resolveEnv, resolveOperation, resolveScript, type ProjectConfig } from "./config.ts";
-import { EmbeddingIndex, embeddingIndexPath, VenuEmbedder, type BuildIndexOptions, type Embedder, type SearchResults } from "./embed.ts";
 import { jq } from "./jq.ts";
 import { operationKind } from "./operation.ts";
 import { SchemaExplorer, type ValidationResult } from "./schema.ts";
@@ -26,8 +25,6 @@ export interface GqlcliOptions {
   retryDelayMs?: number;
   schemaCache?: ClientOptions["schemaCache"];
   fetch?: typeof fetch;
-  /** Used by embed index/search. Default: VenuEmbedder from VENU_API_KEY, created lazily. */
-  embedder?: Embedder;
 }
 
 export interface OperationInput {
@@ -43,7 +40,7 @@ export interface OperationInput {
   jq?: string;
 }
 
-export type ScriptRunOptions = { input?: JsonObject } & Pick<ScriptOptions, "readOnly" | "maxOperations" | "timeoutMs" | "signal" | "approve" | "onResponse">;
+export type ScriptRunOptions = { input?: JsonObject } & Pick<ScriptOptions, "readOnly" | "strict" | "maxOperations" | "timeoutMs" | "signal" | "approve" | "onResponse">;
 export interface ExecutionResult {
   response: GraphQLResponse;
   hasErrors: boolean;
@@ -51,27 +48,21 @@ export interface ExecutionResult {
   jq?: unknown[];
 }
 
-/** One handle bundling config, HTTP client, schema exploration, execution, scripts and semantic search. No subprocesses. */
+/** One handle bundling config, HTTP client, schema exploration, execution and scripts. No subprocesses. */
 export class Gqlcli {
   readonly client: GraphQLClient;
   readonly config: ProjectConfig | undefined;
   readonly envName: string | undefined;
   readonly cwd: string;
-  private readonly embedderOpt: Embedder | undefined;
   private explorer: Promise<SchemaExplorer> | undefined;
-  private embedder: Embedder | undefined;
-  private index: EmbeddingIndex | undefined;
-  private readonly embeddingsPath: string | undefined;
 
   constructor(o: GqlcliOptions = {}) {
     this.cwd = o.cwd ?? process.cwd();
     this.config = o.config ?? loadProjectConfig(this.cwd);
     const resolved = resolveEnv(this.config, o.env);
     this.envName = resolved?.name;
-    this.embeddingsPath = resolved?.env.embeddings;
     const url = o.url ?? process.env["GRAPHQL_URL"] ?? resolved?.env.url;
     if (!url) throw new Error("no GraphQL endpoint: pass url, set GRAPHQL_URL, or configure .gqlcli.json");
-    this.embedderOpt = o.embedder;
     this.client = new GraphQLClient({
       url,
       headers: { ...(resolved?.env.headers ?? {}), ...(o.headers ?? {}) },
@@ -163,42 +154,6 @@ export class Gqlcli {
       ...(input ? { input } : {}),
       execute: (req, signal) => this.client.execute(req, { ...ro, ...(signal ? { signal } : {}) }),
     });
-  }
-
-  private embedderOrThrow(): Embedder {
-    this.embedder ??= this.embedderOpt ?? new VenuEmbedder();
-    return this.embedder;
-  }
-
-  embeddingIndexFile(path?: string): string {
-    return path ?? this.embeddingsPath ?? embeddingIndexPath(this.envName);
-  }
-
-  /** Builds (or incrementally refreshes) the semantic index and saves it. */
-  async embedIndex(o: BuildIndexOptions & { path?: string } = {}): Promise<{ path: string; entries: number; model: string }> {
-    const path = this.embeddingIndexFile(o.path);
-    const embedder = this.embedderOrThrow();
-    const previous = o.previous ?? EmbeddingIndex.loadIfExists(path, embedder);
-    const index = await EmbeddingIndex.build(await this.schema(), embedder, {
-      ...(this.envName ? { env: this.envName } : {}),
-      endpoint: this.client.url,
-      ...(previous ? { previous } : {}),
-      ...o,
-    });
-    index.save(path);
-    this.index = index;
-    const f = index.file;
-    return { path, entries: (f.queries?.length ?? 0) + (f.mutations?.length ?? 0) + f.types.length, model: f.model };
-  }
-
-  /** Semantic search over the saved index: top N queries, mutations and types for a plain-language description. */
-  async embedSearch(text: string, topN = 5, o: { path?: string; signal?: AbortSignal } = {}): Promise<SearchResults> {
-    const embedder = this.embedderOrThrow();
-    const path = this.embeddingIndexFile(o.path);
-    this.index ??= EmbeddingIndex.loadIfExists(path, embedder);
-    if (!this.index) throw new Error(`no embedding index at ${path}; run embedIndex() first`);
-    this.index.setEmbedder(embedder);
-    return this.index.search(text, topN, o.signal);
   }
 }
 

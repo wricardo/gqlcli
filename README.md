@@ -4,11 +4,13 @@
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
 [![Go Report Card](https://goreportcard.com/badge/github.com/wricardo/gqlcli)](https://goreportcard.com/report/github.com/wricardo/gqlcli)
 
-Two tools in one:
+Three tools in one:
 
 1. **`gqlcli` CLI** — A GraphQL client for querying any GraphQL API. Discover fields, execute queries and mutations, explore schemas—all from the command line.
 
 2. **`gqlcli` library** — Build GraphQL-backed CLI applications in Go. Write CLIs where GraphQL is the interface language, not subcommands and flags. Perfect for AI agents that can introspect schemas and construct queries.
+
+3. **TypeScript library** ([`ts/`](ts/)) — The same GraphQL workflow for Node/TypeScript agents, with ready-made [Pi Durable](https://earendil.com/posts/pi-durable/) tools. No shelling out to the CLI. See [TypeScript Library & Pi Durable Tools](#-typescript-library--pi-durable-tools).
 
 ---
 
@@ -946,6 +948,49 @@ for _, m := range results.Mutations {   // also results.Queries, results.Types
 `Search` refuses to run when the index's model differs from the embedder's — scores across vector
 spaces are meaningless. Both CLI modes (HTTP and inline) expose the same `embed index` and
 `embed search` commands.
+
+---
+
+## 🟦 TypeScript Library & Pi Durable Tools
+
+[`ts/`](ts/) is a native TypeScript port of the parts an agent needs. It never shells out to `gqlcli`: it speaks GraphQL over HTTP
+itself and reads the same `.gqlcli.json`. Use it from Node/TypeScript agents, including [Pi Durable](https://earendil.com/posts/pi-durable/)
+harnesses.
+
+```ts
+import { Gqlcli } from "@wricardo/gqlcli";
+
+const g = new Gqlcli({ env: "prod" });                       // .gqlcli.json / GRAPHQL_URL
+const r = await g.query({ query: "{ users { id name } }", jq: ".data.users[].name" });
+const schema = await g.schema();
+schema.describe("Query.user", { args: true, depth: 1 });      // same bytes as `gqlcli describe`
+schema.validate("{ users { nope } }");                        // { valid: false, errors: [{ line, column, message, schemaHint }] }
+await g.script({ source: "async function run(gql) { /* … */ }" }, { readOnly: true, maxOperations: 20 });
+```
+
+Covered: `query`, `mutation`, `subscribe`, `batch`, `script` (`gql.query`, `gql.each`), `--jq` (real jq via WASM), `types`, `queries`,
+`mutations`, `describe`, `sdl`, `validate` (including offline `schemaFile`), output formats, per-request headers, retry and timeout,
+and the shared on-disk schema cache. Not ported: `embed`, `login`, `install-skill`.
+
+**Pi Durable tools** — `gqlcliExtension()` registers `gql_queries`, `gql_mutations`, `gql_types`, `gql_describe`, `gql_sdl`,
+`gql_validate`, `gql_query`, `gql_batch`, `gql_subscribe` and `gql_script` (plus `gql_mutation` on opt-in):
+
+```ts
+import { createRegistry } from "@earendil-works/pi-durable";
+import { gqlcliExtension } from "@wricardo/gqlcli/pi-durable";
+
+const gql = gqlcliExtension({ gqlcli: { env: "prod" } });     // read-only by default
+const registry = createRegistry();
+registry.install(gql);
+const root = await harness.root(context, { agent: { model, extensions: [gql] } });
+```
+
+Read-only by default: every tool is `replay: "safe"`, `gql_query` rejects documents that declare a mutation, and scripts cannot mutate.
+Pass `mutations: true` to add `gql_mutation` and writable scripts; those keep Pi Durable's default no-replay behavior, so a write
+interrupted by a crash is reported to the model instead of repeated.
+
+The TypeScript package is tested against this CLI: `ts/src/parity.test.ts` runs both against the same server and compares
+`describe` byte for byte, plus listings, SDL, validation, queries, `--jq`, `batch` and scripts. See [`ts/README.md`](ts/README.md).
 
 ---
 

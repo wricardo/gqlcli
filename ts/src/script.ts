@@ -1,6 +1,6 @@
 import { createContext, Script } from "node:vm";
 import { operationKind } from "./operation.ts";
-import type { GraphQLResponse, JsonObject, OperationKind } from "./types.ts";
+import { GraphQLResponseError, hasErrors, type GraphQLResponse, type JsonObject, type OperationKind } from "./types.ts";
 
 export interface RequestInfo {
   /** Kind the document actually declares, not the helper the script called. Falls back to the helper's kind if unparsable. */
@@ -21,6 +21,8 @@ export interface ScriptOptions {
   execute: ScriptExecutor;
   /** Reject any operation whose document declares a mutation or subscription. */
   readOnly?: boolean;
+  /** Like the CLI's `--strict` (default true): a response carrying `errors` makes `gql.query`/`gql.mutation` throw. `false` returns it for the script to inspect. */
+  strict?: boolean;
   /** Cap on GraphQL operations per run. Default unlimited. */
   maxOperations?: number;
   /** Wall-clock deadline for the whole run, including awaited requests. */
@@ -42,8 +44,9 @@ export interface ScriptResult {
 
 export interface EachOptions {
   concurrency?: number;
+  /** Default true: the first failure stops the pool and is rethrown. `false` records failures and continues. */
   stopOnError?: boolean;
-  onError?: (err: unknown, item: unknown, index: number) => void;
+  onError?: (err: unknown, item: unknown, index: number) => void | Promise<void>;
 }
 
 export interface EachSummary {
@@ -101,14 +104,17 @@ export async function runScript(opts: ScriptOptions): Promise<ScriptResult> {
     if (opts.maxOperations !== undefined && operations >= opts.maxOperations) throw new Error("script exceeded its GraphQL operation budget");
     operations++;
     await opts.approve?.(info);
+    let res: GraphQLResponse;
     try {
-      const res = await opts.execute({ query, ...(Object.keys(vars).length ? { variables: vars } : {}), ...(name ? { operationName: name } : {}) }, signal);
-      opts.onResponse?.(info, res);
-      return JSON.parse(JSON.stringify(res)) as GraphQLResponse;
+      res = await opts.execute({ query, ...(Object.keys(vars).length ? { variables: vars } : {}), ...(name ? { operationName: name } : {}) }, signal);
     } catch (err) {
       opts.onResponse?.(info, undefined, err as Error);
       throw err;
     }
+    opts.onResponse?.(info, res);
+    const cloned = JSON.parse(JSON.stringify(res)) as GraphQLResponse;
+    if ((opts.strict ?? true) && hasErrors(cloned)) throw new GraphQLResponseError(cloned);
+    return cloned;
   };
 
   const gql = {
@@ -144,16 +150,22 @@ export async function runScript(opts: ScriptOptions): Promise<ScriptResult> {
   }
 }
 
-/** `gql.each`: bounded-concurrency worker pool with a summary, matching the Go runner. */
+/**
+ * `gql.each`: bounded-concurrency worker pool with a summary. Same semantics as the Go runner: `stopOnError` defaults to
+ * true (the first failure aborts the pool and is rethrown), failures are recorded as `String(err)` in occurrence order,
+ * and `onError` is awaited with its own failures ignored.
+ */
 async function each(items: unknown, worker: unknown, o: EachOptions = {}, signal: AbortSignal): Promise<EachSummary> {
   if (!Array.isArray(items)) throw new TypeError("gql.each: items must be an array");
   if (typeof worker !== "function") throw new TypeError("gql.each: worker must be a function");
-  const concurrency = Math.max(1, Math.floor(o.concurrency ?? 1));
+  const parsed = Number(o.concurrency);
+  const concurrency = Number.isFinite(parsed) && parsed > 0 ? Math.max(1, Math.floor(parsed)) : 1;
+  const stopOnError = o.stopOnError !== false;
   const summary: EachSummary = { total: items.length, success: 0, failed: 0, errors: [] };
   let next = 0;
-  let stop = false;
+  let aborted = false;
   const lane = async () => {
-    while (!stop && !signal.aborted) {
+    while (!aborted && !signal.aborted) {
       const index = next++;
       if (index >= items.length) return;
       try {
@@ -161,15 +173,23 @@ async function each(items: unknown, worker: unknown, o: EachOptions = {}, signal
         summary.success++;
       } catch (err) {
         summary.failed++;
-        summary.errors.push({ index, error: errorMessage(err) });
-        o.onError?.(err, items[index], index);
-        if (o.stopOnError) stop = true;
+        summary.errors.push({ index, error: String(err) });
+        try {
+          await o.onError?.(err, items[index], index);
+        } catch {
+          // onError failures are ignored
+        }
+        if (stopOnError) {
+          aborted = true;
+          throw err;
+        }
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, lane));
+  const lanes = Array.from({ length: Math.min(concurrency, items.length) }, lane);
+  if (stopOnError) await Promise.all(lanes);
+  else await Promise.allSettled(lanes);
   if (signal.aborted) throw signal.reason;
-  summary.errors.sort((a, b) => a.index - b.index);
   return summary;
 }
 
