@@ -1,0 +1,40 @@
+{
+  "name": "@wricardo/gqlcli",
+  "version": "0.1.0",
+  "description": "TypeScript port of gqlcli: GraphQL client, schema exploration, validation, jq, batch, scripts, and Pi Durable tools. No shelling out.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./pi-durable": { "types": "./dist/pi-durable/index.d.ts", "default": "./dist/pi-durable/index.js" }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test 'src/**/*.test.ts'",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@toon-format/toon": "^4.4.0",
+    "graphql": "^17.0.2",
+    "graphql-ws": "^6.4.1",
+    "jq-wasm": "^3.0.0-jq-1.8.2",
+    "ws": "^8.22.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "^1.4.0",
+    "@earendil-works/pi-durable": "^1.4.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": { "optional": true },
+    "@earendil-works/pi-durable": { "optional": true }
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^1.4.0",
+    "@earendil-works/pi-durable": "^1.4.0",
+    "@types/node": "^26.6.5",
+    "@types/ws": "^8.18.2",
+    "typescript": "^7.0.2"
+  }
+}
