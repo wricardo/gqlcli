@@ -1,6 +1,6 @@
 {
   "name": "@wricardo/gqlcli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "TypeScript port of gqlcli: GraphQL client, schema exploration, validation, jq, batch, scripts, and Pi Durable tools. No shelling out.",
   "type": "module",
   "main": "./dist/index.js",
