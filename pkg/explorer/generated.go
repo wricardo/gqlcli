@@ -66,6 +66,7 @@ type ComplexityRoot struct {
 		ReturnType     func(childComplexity int) int
 		RootField      func(childComplexity int) int
 		Sdl            func(childComplexity int, includeDescription *bool) int
+		Shape          func(childComplexity int) int
 	}
 
 	PageInfo struct {
@@ -87,7 +88,7 @@ type ComplexityRoot struct {
 		Operations      func(childComplexity int, kind *model.OperationKind, filter *string, returns *string, accepts *string, first *int) int
 		Overview        func(childComplexity int) int
 		Paths           func(childComplexity int, from string, to string, traversal *model.PathTraversal, maxDepth *int, first *int, after *string) int
-		ReachableFields func(childComplexity int, matching string, from *string, maxDepth *int, first *int, after *string) int
+		ReachableFields func(childComplexity int, matching string, kind *model.OperationKind, from *string, maxDepth *int, first *int, after *string) int
 		Type            func(childComplexity int, name string) int
 		Types           func(childComplexity int, filter *string, kind *model.TypeKind, first *int) int
 		Validate        func(childComplexity int, document string) int
@@ -155,11 +156,14 @@ type ComplexityRoot struct {
 	}
 
 	SchemaPath struct {
-		Depth      func(childComplexity int) int
-		FieldDepth func(childComplexity int) int
-		From       func(childComplexity int) int
-		Segments   func(childComplexity int) int
-		To         func(childComplexity int) int
+		Coordinates       func(childComplexity int) int
+		Depth             func(childComplexity int) int
+		EdgeKinds         func(childComplexity int) int
+		FieldDepth        func(childComplexity int) int
+		From              func(childComplexity int) int
+		Segments          func(childComplexity int) int
+		SuggestedDocument func(childComplexity int) int
+		To                func(childComplexity int) int
 	}
 
 	SchemaPathConnection struct {
@@ -227,6 +231,7 @@ type EnumValueResolver interface {
 }
 type OperationResolver interface {
 	Sdl(ctx context.Context, obj *model.Operation, includeDescription *bool) (string, error)
+	Shape(ctx context.Context, obj *model.Operation) (string, error)
 	RootField(ctx context.Context, obj *model.Operation) (*model.SchemaField, error)
 	Arguments(ctx context.Context, obj *model.Operation) ([]*model.SchemaInputValue, error)
 	ReturnType(ctx context.Context, obj *model.Operation) (*model.TypeRef, error)
@@ -243,7 +248,7 @@ type QueryResolver interface {
 	Element(ctx context.Context, coordinate string) (model.SchemaElement, error)
 	Elements(ctx context.Context, filter string, kinds []model.ElementKind, first *int) ([]model.SchemaElement, error)
 	Paths(ctx context.Context, from string, to string, traversal *model.PathTraversal, maxDepth *int, first *int, after *string) (*model.SchemaPathConnection, error)
-	ReachableFields(ctx context.Context, matching string, from *string, maxDepth *int, first *int, after *string) (*model.ReachableFieldConnection, error)
+	ReachableFields(ctx context.Context, matching string, kind *model.OperationKind, from *string, maxDepth *int, first *int, after *string) (*model.ReachableFieldConnection, error)
 	Validate(ctx context.Context, document string) (*model.ValidationResult, error)
 }
 type ReachableFieldResolver interface {
@@ -272,6 +277,9 @@ type SchemaPathResolver interface {
 	To(ctx context.Context, obj *model.SchemaPath) (model.SchemaElement, error)
 
 	Segments(ctx context.Context, obj *model.SchemaPath) ([]*model.PathSegment, error)
+	Coordinates(ctx context.Context, obj *model.SchemaPath) ([]string, error)
+	EdgeKinds(ctx context.Context, obj *model.SchemaPath) ([]model.ReferenceKind, error)
+	SuggestedDocument(ctx context.Context, obj *model.SchemaPath) (*string, error)
 }
 type SchemaTypeResolver interface {
 	Sdl(ctx context.Context, obj *model.SchemaType, includeDescription *bool) (string, error)
@@ -427,6 +435,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Operation.Sdl(childComplexity, args["includeDescription"].(*bool)), true
+	case "Operation.shape":
+		if e.ComplexityRoot.Operation.Shape == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Operation.Shape(childComplexity), true
 
 	case "PageInfo.endCursor":
 		if e.ComplexityRoot.PageInfo.EndCursor == nil {
@@ -548,7 +562,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.ComplexityRoot.Query.ReachableFields(childComplexity, args["matching"].(string), args["from"].(*string), args["maxDepth"].(*int), args["first"].(*int), args["after"].(*string)), true
+		return e.ComplexityRoot.Query.ReachableFields(childComplexity, args["matching"].(string), args["kind"].(*model.OperationKind), args["from"].(*string), args["maxDepth"].(*int), args["first"].(*int), args["after"].(*string)), true
 	case "Query.type":
 		if e.ComplexityRoot.Query.Type == nil {
 			break
@@ -862,12 +876,24 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.SchemaOverview.TypeCount(childComplexity), true
 
+	case "SchemaPath.coordinates":
+		if e.ComplexityRoot.SchemaPath.Coordinates == nil {
+			break
+		}
+
+		return e.ComplexityRoot.SchemaPath.Coordinates(childComplexity), true
 	case "SchemaPath.depth":
 		if e.ComplexityRoot.SchemaPath.Depth == nil {
 			break
 		}
 
 		return e.ComplexityRoot.SchemaPath.Depth(childComplexity), true
+	case "SchemaPath.edgeKinds":
+		if e.ComplexityRoot.SchemaPath.EdgeKinds == nil {
+			break
+		}
+
+		return e.ComplexityRoot.SchemaPath.EdgeKinds(childComplexity), true
 	case "SchemaPath.fieldDepth":
 		if e.ComplexityRoot.SchemaPath.FieldDepth == nil {
 			break
@@ -886,6 +912,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.SchemaPath.Segments(childComplexity), true
+	case "SchemaPath.suggestedDocument":
+		if e.ComplexityRoot.SchemaPath.SuggestedDocument == nil {
+			break
+		}
+
+		return e.ComplexityRoot.SchemaPath.SuggestedDocument(childComplexity), true
 	case "SchemaPath.to":
 		if e.ComplexityRoot.SchemaPath.To == nil {
 			break
@@ -1432,26 +1464,31 @@ func (ec *executionContext) field_Query_reachableFields_args(ctx context.Context
 		return nil, err
 	}
 	args["matching"] = arg0
-	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "from", ec.unmarshalOString2ᚖstring)
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "kind", ec.unmarshalOOperationKind2ᚖgithubᚗcomᚋwricardoᚋgqlcliᚋpkgᚋexplorerᚋmodelᚐOperationKind)
 	if err != nil {
 		return nil, err
 	}
-	args["from"] = arg1
-	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "maxDepth", ec.unmarshalOInt2ᚖint)
+	args["kind"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "from", ec.unmarshalOString2ᚖstring)
 	if err != nil {
 		return nil, err
 	}
-	args["maxDepth"] = arg2
-	arg3, err := graphql.ProcessArgField(ctx, rawArgs, "first", ec.unmarshalOInt2ᚖint)
+	args["from"] = arg2
+	arg3, err := graphql.ProcessArgField(ctx, rawArgs, "maxDepth", ec.unmarshalOInt2ᚖint)
 	if err != nil {
 		return nil, err
 	}
-	args["first"] = arg3
-	arg4, err := graphql.ProcessArgField(ctx, rawArgs, "after", ec.unmarshalOString2ᚖstring)
+	args["maxDepth"] = arg3
+	arg4, err := graphql.ProcessArgField(ctx, rawArgs, "first", ec.unmarshalOInt2ᚖint)
 	if err != nil {
 		return nil, err
 	}
-	args["after"] = arg4
+	args["first"] = arg4
+	arg5, err := graphql.ProcessArgField(ctx, rawArgs, "after", ec.unmarshalOString2ᚖstring)
+	if err != nil {
+		return nil, err
+	}
+	args["after"] = arg5
 	return args, nil
 }
 
@@ -2043,6 +2080,35 @@ func (ec *executionContext) fieldContext_Operation_sdl(ctx context.Context, fiel
 	return fc, nil
 }
 
+func (ec *executionContext) _Operation_shape(ctx context.Context, field graphql.CollectedField, obj *model.Operation) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Operation_shape,
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Operation().Shape(ctx, obj)
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Operation_shape(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Operation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Operation_rootField(ctx context.Context, field graphql.CollectedField, obj *model.Operation) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -2479,6 +2545,8 @@ func (ec *executionContext) fieldContext_Query_operations(ctx context.Context, f
 				return ec.fieldContext_Operation_description(ctx, field)
 			case "sdl":
 				return ec.fieldContext_Operation_sdl(ctx, field)
+			case "shape":
+				return ec.fieldContext_Operation_shape(ctx, field)
 			case "rootField":
 				return ec.fieldContext_Operation_rootField(ctx, field)
 			case "arguments":
@@ -2540,6 +2608,8 @@ func (ec *executionContext) fieldContext_Query_operation(ctx context.Context, fi
 				return ec.fieldContext_Operation_description(ctx, field)
 			case "sdl":
 				return ec.fieldContext_Operation_sdl(ctx, field)
+			case "shape":
+				return ec.fieldContext_Operation_shape(ctx, field)
 			case "rootField":
 				return ec.fieldContext_Operation_rootField(ctx, field)
 			case "arguments":
@@ -2963,7 +3033,7 @@ func (ec *executionContext) _Query_reachableFields(ctx context.Context, field gr
 		ec.fieldContext_Query_reachableFields,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.Resolvers.Query().ReachableFields(ctx, fc.Args["matching"].(string), fc.Args["from"].(*string), fc.Args["maxDepth"].(*int), fc.Args["first"].(*int), fc.Args["after"].(*string))
+			return ec.Resolvers.Query().ReachableFields(ctx, fc.Args["matching"].(string), fc.Args["kind"].(*model.OperationKind), fc.Args["from"].(*string), fc.Args["maxDepth"].(*int), fc.Args["first"].(*int), fc.Args["after"].(*string))
 		},
 		nil,
 		ec.marshalNReachableFieldConnection2ᚖgithubᚗcomᚋwricardoᚋgqlcliᚋpkgᚋexplorerᚋmodelᚐReachableFieldConnection,
@@ -3191,6 +3261,8 @@ func (ec *executionContext) fieldContext_ReachableField_operation(_ context.Cont
 				return ec.fieldContext_Operation_description(ctx, field)
 			case "sdl":
 				return ec.fieldContext_Operation_sdl(ctx, field)
+			case "shape":
+				return ec.fieldContext_Operation_shape(ctx, field)
 			case "rootField":
 				return ec.fieldContext_Operation_rootField(ctx, field)
 			case "arguments":
@@ -4911,6 +4983,93 @@ func (ec *executionContext) fieldContext_SchemaPath_segments(_ context.Context, 
 	return fc, nil
 }
 
+func (ec *executionContext) _SchemaPath_coordinates(ctx context.Context, field graphql.CollectedField, obj *model.SchemaPath) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SchemaPath_coordinates,
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.SchemaPath().Coordinates(ctx, obj)
+		},
+		nil,
+		ec.marshalNString2ᚕstringᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SchemaPath_coordinates(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SchemaPath",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SchemaPath_edgeKinds(ctx context.Context, field graphql.CollectedField, obj *model.SchemaPath) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SchemaPath_edgeKinds,
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.SchemaPath().EdgeKinds(ctx, obj)
+		},
+		nil,
+		ec.marshalNReferenceKind2ᚕgithubᚗcomᚋwricardoᚋgqlcliᚋpkgᚋexplorerᚋmodelᚐReferenceKindᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SchemaPath_edgeKinds(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SchemaPath",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ReferenceKind does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SchemaPath_suggestedDocument(ctx context.Context, field graphql.CollectedField, obj *model.SchemaPath) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SchemaPath_suggestedDocument,
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.SchemaPath().SuggestedDocument(ctx, obj)
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_SchemaPath_suggestedDocument(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SchemaPath",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _SchemaPathConnection_nodes(ctx context.Context, field graphql.CollectedField, obj *model.SchemaPathConnection) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -4945,6 +5104,12 @@ func (ec *executionContext) fieldContext_SchemaPathConnection_nodes(_ context.Co
 				return ec.fieldContext_SchemaPath_fieldDepth(ctx, field)
 			case "segments":
 				return ec.fieldContext_SchemaPath_segments(ctx, field)
+			case "coordinates":
+				return ec.fieldContext_SchemaPath_coordinates(ctx, field)
+			case "edgeKinds":
+				return ec.fieldContext_SchemaPath_edgeKinds(ctx, field)
+			case "suggestedDocument":
+				return ec.fieldContext_SchemaPath_suggestedDocument(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type SchemaPath", field.Name)
 		},
@@ -5562,6 +5727,8 @@ func (ec *executionContext) fieldContext_SchemaType_operations(ctx context.Conte
 				return ec.fieldContext_Operation_description(ctx, field)
 			case "sdl":
 				return ec.fieldContext_Operation_sdl(ctx, field)
+			case "shape":
+				return ec.fieldContext_Operation_shape(ctx, field)
 			case "rootField":
 				return ec.fieldContext_Operation_rootField(ctx, field)
 			case "arguments":
@@ -8090,6 +8257,42 @@ func (ec *executionContext) _Operation(ctx context.Context, sel ast.SelectionSet
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "shape":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Operation_shape(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "rootField":
 			field := field
 
@@ -9536,6 +9739,111 @@ func (ec *executionContext) _SchemaPath(ctx context.Context, sel ast.SelectionSe
 				if res == graphql.Null {
 					atomic.AddUint32(&fs.Invalids, 1)
 				}
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "coordinates":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._SchemaPath_coordinates(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "edgeKinds":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._SchemaPath_edgeKinds(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "suggestedDocument":
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._SchemaPath_suggestedDocument(ctx, field, obj)
 				return res
 			}
 
@@ -11030,6 +11338,37 @@ func (ec *executionContext) marshalNReferenceKind2githubᚗcomᚋwricardoᚋgqlc
 	return v
 }
 
+func (ec *executionContext) unmarshalNReferenceKind2ᚕgithubᚗcomᚋwricardoᚋgqlcliᚋpkgᚋexplorerᚋmodelᚐReferenceKindᚄ(ctx context.Context, v any) ([]model.ReferenceKind, error) {
+	var vSlice []any
+	vSlice = graphql.CoerceList(v)
+	var err error
+	res := make([]model.ReferenceKind, len(vSlice))
+	for i := range vSlice {
+		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithIndex(i))
+		res[i], err = ec.unmarshalNReferenceKind2githubᚗcomᚋwricardoᚋgqlcliᚋpkgᚋexplorerᚋmodelᚐReferenceKind(ctx, vSlice[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return res, nil
+}
+
+func (ec *executionContext) marshalNReferenceKind2ᚕgithubᚗcomᚋwricardoᚋgqlcliᚋpkgᚋexplorerᚋmodelᚐReferenceKindᚄ(ctx context.Context, sel ast.SelectionSet, v []model.ReferenceKind) graphql.Marshaler {
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNReferenceKind2githubᚗcomᚋwricardoᚋgqlcliᚋpkgᚋexplorerᚋmodelᚐReferenceKind(ctx, sel, v[i])
+	})
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
 func (ec *executionContext) marshalNSchemaEdge2ᚕᚖgithubᚗcomᚋwricardoᚋgqlcliᚋpkgᚋexplorerᚋmodelᚐSchemaEdgeᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.SchemaEdge) graphql.Marshaler {
 	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
 		fc := graphql.GetFieldContext(ctx)
@@ -11262,6 +11601,36 @@ func (ec *executionContext) marshalNString2string(ctx context.Context, sel ast.S
 		}
 	}
 	return res
+}
+
+func (ec *executionContext) unmarshalNString2ᚕstringᚄ(ctx context.Context, v any) ([]string, error) {
+	var vSlice []any
+	vSlice = graphql.CoerceList(v)
+	var err error
+	res := make([]string, len(vSlice))
+	for i := range vSlice {
+		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithIndex(i))
+		res[i], err = ec.unmarshalNString2string(ctx, vSlice[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return res, nil
+}
+
+func (ec *executionContext) marshalNString2ᚕstringᚄ(ctx context.Context, sel ast.SelectionSet, v []string) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	for i := range v {
+		ret[i] = ec.marshalNString2string(ctx, sel, v[i])
+	}
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
 }
 
 func (ec *executionContext) unmarshalNTypeKind2githubᚗcomᚋwricardoᚋgqlcliᚋpkgᚋexplorerᚋmodelᚐTypeKind(ctx context.Context, v any) (model.TypeKind, error) {

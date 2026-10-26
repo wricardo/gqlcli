@@ -111,11 +111,11 @@ func (r *Resolver) edgeByID(id string) *graph.Edge {
 }
 
 type reachCursor struct {
-	Snapshot, From, Matching string
-	Depth, Position, First   int
+	Snapshot, From, Matching, Kind string
+	Depth, Position, First         int
 }
 
-func (r *Resolver) reachableFields(matching string, from *string, maxDepth, first *int, after *string) (*model.ReachableFieldConnection, error) {
+func (r *Resolver) reachableFields(matching string, kind *model.OperationKind, from *string, maxDepth, first *int, after *string) (*model.ReachableFieldConnection, error) {
 	n, err := clampFirst(first, 50)
 	if err != nil {
 		return nil, err
@@ -131,6 +131,10 @@ func (r *Resolver) reachableFields(matching string, from *string, maxDepth, firs
 	if origin != "" && r.operation(origin) == nil {
 		return nil, fmt.Errorf("unknown operation %q", origin)
 	}
+	operationKind := ""
+	if kind != nil {
+		operationKind = string(*kind)
+	}
 	position := 0
 	if after != nil && *after != "" {
 		data, err := base64.RawURLEncoding.DecodeString(*after)
@@ -144,7 +148,7 @@ func (r *Resolver) reachableFields(matching string, from *string, maxDepth, firs
 		if c.Snapshot != r.Index.Snapshot {
 			return nil, fmt.Errorf("stale reachability cursor: schema changed")
 		}
-		if c.From != origin || c.Matching != matching || c.Depth != depth || c.First != n || c.Position <= 0 {
+		if c.From != origin || c.Matching != matching || c.Kind != operationKind || c.Depth != depth || c.First != n || c.Position <= 0 {
 			return nil, fmt.Errorf("reachability cursor does not match this query")
 		}
 		position = c.Position
@@ -159,6 +163,9 @@ func (r *Resolver) reachableFields(matching string, from *string, maxDepth, firs
 	found := 0
 	for _, op := range r.operations() {
 		if origin != "" && origin != op.Coordinate {
+			continue
+		}
+		if kind != nil && op.Kind != *kind {
 			continue
 		}
 		for _, target := range fields {
@@ -177,7 +184,7 @@ func (r *Resolver) reachableFields(matching string, from *string, maxDepth, firs
 			}
 			if len(result.Nodes) == n {
 				result.PageInfo.HasNextPage = true
-				return r.reachPage(result, matching, origin, depth, found-1, n), nil
+				return r.reachPage(result, matching, operationKind, origin, depth, found-1, n), nil
 			}
 			result.Nodes = append(result.Nodes, model.NewReachableField(op, r.schemaField(target.Coordinate), depth))
 		}
@@ -185,12 +192,12 @@ func (r *Resolver) reachableFields(matching string, from *string, maxDepth, firs
 	if found < position {
 		return nil, fmt.Errorf("reachability cursor is past the end")
 	}
-	return r.reachPage(result, matching, origin, depth, found, n), nil
+	return r.reachPage(result, matching, operationKind, origin, depth, found, n), nil
 }
 
-func (r *Resolver) reachPage(page *model.ReachableFieldConnection, matching, from string, depth, position, first int) *model.ReachableFieldConnection {
+func (r *Resolver) reachPage(page *model.ReachableFieldConnection, matching, kind, from string, depth, position, first int) *model.ReachableFieldConnection {
 	if len(page.Nodes) != 0 {
-		data, _ := json.Marshal(reachCursor{Snapshot: r.Index.Snapshot, From: from, Matching: matching, Depth: depth, Position: position, First: first})
+		data, _ := json.Marshal(reachCursor{Snapshot: r.Index.Snapshot, From: from, Matching: matching, Kind: kind, Depth: depth, Position: position, First: first})
 		cursor := base64.RawURLEncoding.EncodeToString(data)
 		page.PageInfo.EndCursor = &cursor
 	}

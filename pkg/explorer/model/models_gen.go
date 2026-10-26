@@ -37,11 +37,13 @@ func (this EnumValue) GetDescription() *string { return this.Description }
 func (this EnumValue) GetSdl() string { return this.Sdl }
 
 type Operation struct {
-	Name           string              `json:"name"`
-	Coordinate     string              `json:"coordinate"`
-	Kind           OperationKind       `json:"kind"`
-	Description    *string             `json:"description,omitempty"`
-	Sdl            string              `json:"sdl"`
+	Name        string        `json:"name"`
+	Coordinate  string        `json:"coordinate"`
+	Kind        OperationKind `json:"kind"`
+	Description *string       `json:"description,omitempty"`
+	Sdl         string        `json:"sdl"`
+	// Operation signature, directly referenced input types, and one level of output fields.
+	Shape          string              `json:"shape"`
 	RootField      *SchemaField        `json:"rootField"`
 	Arguments      []*SchemaInputValue `json:"arguments"`
 	ReturnType     *TypeRef            `json:"returnType"`
@@ -138,6 +140,12 @@ type SchemaPath struct {
 	Depth      int            `json:"depth"`
 	FieldDepth int            `json:"fieldDepth"`
 	Segments   []*PathSegment `json:"segments"`
+	// Coordinates in traversal order, including both endpoints.
+	Coordinates []string `json:"coordinates"`
+	// Edge kinds in traversal order; one fewer than coordinates.
+	EdgeKinds []ReferenceKind `json:"edgeKinds"`
+	// Validated executable document for an output path from a root operation, when representable.
+	SuggestedDocument *string `json:"suggestedDocument,omitempty"`
 }
 
 type SchemaPathConnection struct {

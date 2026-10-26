@@ -92,6 +92,21 @@ export class ExplorerRuntime {
   private edges(coord: string, outgoing: boolean, kind?: string): ExplorerEdge[] {
     return (outgoing ? this.graph.outgoing : this.graph.incoming).get(coord)?.filter((e) => !kind || e.kind === kind) ?? [];
   }
+  private shape(operation: Operation): string {
+    const element = this.element(operation.coordinate, "FIELD")!;
+    const field = this.field(element);
+    const declarations = [renderElement(element)];
+    const seen = new Set<string>();
+    for (const type of [...field.args.map((arg) => named(arg.type)), named(field.type)]) {
+      if (seen.has(type.name)) continue;
+      seen.add(type.name);
+      if (!isInputObjectType(type) && !isEnumType(type) && !isObjectType(type) && !isInterfaceType(type) && !isUnionType(type)) continue;
+      const definition = this.element(type.name, "TYPE");
+      if (definition) declarations.push(renderElement(definition));
+    }
+    return declarations.join("\n");
+  }
+
   private reachableTypes(coord: string, maxDepth: number): ExplorerElement[] {
     if (maxDepth < 0) throw new Error("maxDepth must not be negative");
     const seen = new Set([coord]);
@@ -114,19 +129,81 @@ export class ExplorerRuntime {
   private paths(from: string, to: string, traversal: "OUTPUT" | "INPUT" | "ALL", depth: number, first: number, after?: string) {
     return this.graph.paths(from, to, traversal, depth, first, after ?? "");
   }
-  private reachable(matching: string, from: string, depth: number, first: number, after?: string) {
+  private suggestedDocument(path: ExplorerPath): string | null {
+    let current = path.from;
+    let start = 0;
+    if (current.kind === "TYPE") {
+      const edge = path.edges[0];
+      if (!edge || edge.source !== current || edge.kind !== "DECLARES_FIELD" || !this.op(edge.target.coordinate)) return null;
+      current = edge.target;
+      start = 1;
+    }
+    const operation = this.op(current.coordinate);
+    if (!operation || current.kind !== "FIELD") return null;
+    const selected: { field: ExplorerElement; fragment: string }[] = [{ field: current, fragment: "" }];
+    let fragment = "";
+    for (let index = start; index < path.edges.length; index++) {
+      const edge = path.edges[index]!;
+      if (edge.source !== current) return null;
+      const target = edge.target;
+      switch (edge.kind) {
+        case "RETURNS":
+          if (current.kind !== "FIELD" || target.kind !== "TYPE" || named(this.field(current).type).name !== target.name) return null;
+          break;
+        case "UNION_MEMBER":
+        case "POSSIBLE_TYPE":
+          if (current.kind !== "TYPE" || target.kind !== "TYPE" || !isObjectType(target.value as GraphQLNamedType) || fragment ||
+            (edge.kind === "UNION_MEMBER" ? !isUnionType(current.value as GraphQLNamedType) : !isInterfaceType(current.value as GraphQLNamedType))) return null;
+          fragment = target.name;
+          break;
+        case "DECLARES_FIELD":
+          if (current.kind !== "TYPE" || target.kind !== "FIELD" || target.parent !== current.value) return null;
+          selected.push({ field: target, fragment });
+          fragment = "";
+          break;
+        default: return null;
+      }
+      current = target;
+    }
+    if (current.kind !== "FIELD" || current.coordinate !== path.to.coordinate || fragment) return null;
+    const variables: string[] = [];
+    let fields = "";
+    for (const [index, step] of selected.entries()) {
+      if (index !== 0) fields += ` { ${step.fragment ? `... on ${step.fragment} { ` : ""}`;
+      fields += step.field.name;
+      const argumentsText: string[] = [];
+      for (const arg of this.field(step.field).args) {
+        if (!(arg.type instanceof GraphQLNonNull) || arg.defaultValue !== undefined || arg.default !== undefined) continue;
+        const variable = `v${index}_${arg.name}`;
+        argumentsText.push(`${arg.name}: $${variable}`);
+        variables.push(`$${variable}: ${arg.type}`);
+      }
+      if (argumentsText.length) fields += `(${argumentsText.join(", ")})`;
+    }
+    const terminal = named(this.field(current).type);
+    if (isObjectType(terminal) || isInterfaceType(terminal) || isUnionType(terminal)) fields += " { __typename }";
+    else if (!isEnumType(terminal) && typeKind(terminal) !== "SCALAR") return null;
+    for (let i = selected.length - 1; i > 0; i--) {
+      if (selected[i]!.fragment) fields += " }";
+      fields += " }";
+    }
+    const document = `${operation.kind.toLowerCase()}${variables.length ? `(${variables.join(", ")})` : ""} { ${fields} }`;
+    return validate(this.schema, parse(document)).length ? null : document;
+  }
+
+  private reachable(matching: string, kind: string, from: string, depth: number, first: number, after?: string) {
     positive(first);
     if (depth < 0) throw new Error("maxDepth must not be negative");
     if (from && !this.op(from)) throw new Error(`unknown operation ${JSON.stringify(from)}`);
     let position = 0;
     if (after) {
-      let cursor: { Snapshot: string; From: string; Matching: string; Depth: number; Position: number; First: number };
+      let cursor: { Snapshot: string; From: string; Matching: string; Kind: string; Depth: number; Position: number; First: number };
       try {
         if (!/^[A-Za-z0-9_-]+$/.test(after) || Buffer.from(after, "base64url").toString("base64url") !== after) throw new Error("invalid base64url");
         cursor = JSON.parse(Buffer.from(after, "base64url").toString("utf8"));
       } catch { throw new Error("invalid reachability cursor"); }
       if (cursor.Snapshot !== this.graph.snapshot) throw new Error("stale reachability cursor: schema changed");
-      if (cursor.From !== from || cursor.Matching !== matching || cursor.Depth !== depth || cursor.First !== first || !Number.isInteger(cursor.Position) || cursor.Position <= 0)
+      if (cursor.From !== from || cursor.Matching !== matching || cursor.Kind !== kind || cursor.Depth !== depth || cursor.First !== first || !Number.isInteger(cursor.Position) || cursor.Position <= 0)
         throw new Error("reachability cursor does not match this query");
       position = cursor.Position;
     }
@@ -136,6 +213,7 @@ export class ExplorerRuntime {
     let hasNextPage = false;
     outer: for (const op of this.operationsList) {
       if (from && op.coordinate !== from) continue;
+      if (kind && op.kind !== kind) continue;
       for (const target of fields) {
         if (op.coordinate !== target.coordinate && !this.paths(op.coordinate, target.coordinate, "OUTPUT", depth, 1).nodes.length) continue;
         found++;
@@ -145,7 +223,7 @@ export class ExplorerRuntime {
       }
     }
     if (!hasNextPage && found < position) throw new Error("reachability cursor is past the end");
-    const endCursor = nodes.length ? Buffer.from(JSON.stringify({ Snapshot: this.graph.snapshot, From: from, Matching: matching, Depth: depth, Position: position + nodes.length, First: first })
+    const endCursor = nodes.length ? Buffer.from(JSON.stringify({ Snapshot: this.graph.snapshot, From: from, Matching: matching, Kind: kind, Depth: depth, Position: position + nodes.length, First: first })
       .replace(/[<>&\u2028\u2029]/g, (char) => ({ "<": "\\u003c", ">": "\\u003e", "&": "\\u0026", "\u2028": "\\u2028", "\u2029": "\\u2029" })[char]!)).toString("base64url") : null;
     return { nodes, pageInfo: { hasNextPage, endCursor } };
   }
@@ -260,7 +338,7 @@ export class ExplorerRuntime {
         case "element": return this.element(args.coordinate);
         case "elements": return this.ordered.filter((e) => contains(`${e.coordinate} ${e.description ?? ""}`, args.filter) && (!args.kinds?.length || args.kinds.includes(e.kind))).slice(0, positive(args.first));
         case "paths": return this.paths(args.from, args.to, args.traversal, args.maxDepth, args.first, args.after);
-        case "reachableFields": return this.reachable(args.matching, args.from ?? "", args.maxDepth, args.first, args.after);
+        case "reachableFields": return this.reachable(args.matching, args.kind ?? "", args.from ?? "", args.maxDepth, args.first, args.after);
         case "validate": return this.validation(args.document);
       }
     }
@@ -274,6 +352,7 @@ export class ExplorerRuntime {
     if (parent === "Operation") {
       const e = this.element((source as Operation).coordinate)!;
       switch (field) {
+        case "shape": return this.shape(source as Operation);
         case "rootField": return e;
         case "arguments": return this.args(e);
         case "returnType": return this.ref(this.field(e).type);
@@ -342,9 +421,14 @@ export class ExplorerRuntime {
       const value = source as Reachable;
       return this.paths(value.operation.coordinate, value.target.coordinate, "OUTPUT", value.depth, args.first, args.after);
     }
-    if (parent === "SchemaPath" && field === "segments") {
+    if (parent === "SchemaPath") {
       const value = source as ExplorerPath;
-      return value.edges.map((edge, index) => ({ index, edge }));
+      switch (field) {
+        case "segments": return value.edges.map((edge, index) => ({ index, edge }));
+        case "coordinates": return [value.from.coordinate, ...value.edges.map((edge) => edge.target.coordinate)];
+        case "edgeKinds": return value.edges.map((edge) => edge.kind);
+        case "suggestedDocument": return this.suggestedDocument(value);
+      }
     }
     const value = source as Source;
     return value[field];

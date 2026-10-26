@@ -75,3 +75,55 @@ func TestExploreCommandUsesCacheWithoutRemoteExecution(t *testing.T) {
 		t.Fatalf("offline explorer sent %d unexpected requests", *requests-initial)
 	}
 }
+
+func TestExplorePrintSchemaField(t *testing.T) {
+	app, out, requests := validateCLI(t)
+	if err := app.Run([]string{"gqlcli", "explore", "--print-schema"}); err != nil {
+		t.Fatal(err)
+	}
+	full := out.String()
+	if full != ExplorerSDL() {
+		t.Fatalf("bare --print-schema changed its output")
+	}
+
+	for _, tc := range []struct {
+		field string
+		want  []string
+	}{
+		{"operations", []string{"operations(kind: OperationKind", "type Operation", "type SchemaField", "type TypeRef", "enum OperationKind"}},
+		{"paths", []string{"paths(from: String!", "type SchemaPathConnection", "type SchemaPath", "type PathSegment", "type SchemaEdge", "interface SchemaElement", "enum PathTraversal"}},
+		{"reachableFields", []string{"reachableFields(matching: String!", "type ReachableFieldConnection", "type ReachableField", "type SchemaPathConnection", "type PathSegment", "type SchemaEdge"}},
+	} {
+		t.Run(tc.field, func(t *testing.T) {
+			out.Reset()
+			if err := app.Run([]string{"gqlcli", "explore", "--print-schema-field", tc.field}); err != nil {
+				t.Fatal(err)
+			}
+			scoped := out.String()
+			if len(scoped) >= len(full)*85/100 {
+				t.Errorf("scoped schema is not substantially smaller: %d vs %d bytes", len(scoped), len(full))
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(scoped, want) {
+					t.Errorf("schema for %s missing %q", tc.field, want)
+				}
+			}
+			if strings.Contains(scoped, "\n  overview:") || strings.Contains(scoped, "\n  validate(") {
+				t.Error("scoped output includes unrelated root fields")
+			}
+		})
+	}
+	out.Reset()
+	err := app.Run([]string{"gqlcli", "explore", "--print-schema-field", "notAField"})
+	if err == nil || !strings.Contains(err.Error(), "unknown explorer root field") || !strings.Contains(err.Error(), "reachableFields") {
+		t.Errorf("unexpected invalid scope error: %v", err)
+	}
+	out.Reset()
+	err = app.Run([]string{"gqlcli", "explore", "--print-schema-field", ""})
+	if err == nil || !strings.Contains(err.Error(), "unknown explorer root field") {
+		t.Errorf("unexpected empty scope error: %v", err)
+	}
+	if *requests != 0 {
+		t.Errorf("printing explorer schema sent %d target requests", *requests)
+	}
+}

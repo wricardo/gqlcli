@@ -29,6 +29,50 @@ func (r *operationResolver) Sdl(ctx context.Context, obj *model.Operation, inclu
 	return render.Element(r.element(obj.Coordinate), includeDescription != nil && *includeDescription)
 }
 
+// Shape is the resolver for the shape field.
+func (r *operationResolver) Shape(ctx context.Context, obj *model.Operation) (string, error) {
+	field := r.element(obj.Coordinate)
+	if field == nil || field.Field == nil {
+		return "", fmt.Errorf("unknown operation %q", obj.Coordinate)
+	}
+	signature, err := render.Element(field, false)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	b.WriteString(signature)
+	seen := make(map[string]bool, len(field.Field.Arguments)+1)
+	addType := func(name string) error {
+		if seen[name] || name == "" {
+			return nil
+		}
+		seen[name] = true
+		e := r.element(name)
+		if e == nil || e.Definition == nil {
+			return nil
+		}
+		if e.Definition.Kind != "INPUT_OBJECT" && e.Definition.Kind != "ENUM" && e.Definition.Kind != "OBJECT" && e.Definition.Kind != "INTERFACE" && e.Definition.Kind != "UNION" {
+			return nil
+		}
+		sdl, err := render.Element(e, false)
+		if err != nil {
+			return err
+		}
+		b.WriteByte('\n')
+		b.WriteString(sdl)
+		return nil
+	}
+	for _, arg := range field.Field.Arguments {
+		if err := addType(arg.Type.Name()); err != nil {
+			return "", err
+		}
+	}
+	if err := addType(field.Field.Type.Name()); err != nil {
+		return "", err
+	}
+	return b.String(), nil
+}
+
 // RootField is the resolver for the rootField field.
 func (r *operationResolver) RootField(ctx context.Context, obj *model.Operation) (*model.SchemaField, error) {
 	return r.schemaField(obj.Coordinate), nil
@@ -216,8 +260,8 @@ func (r *queryResolver) Paths(ctx context.Context, from string, to string, trave
 }
 
 // ReachableFields is the resolver for the reachableFields field.
-func (r *queryResolver) ReachableFields(ctx context.Context, matching string, from *string, maxDepth *int, first *int, after *string) (*model.ReachableFieldConnection, error) {
-	return r.reachableFields(matching, from, maxDepth, first, after)
+func (r *queryResolver) ReachableFields(ctx context.Context, matching string, kind *model.OperationKind, from *string, maxDepth *int, first *int, after *string) (*model.ReachableFieldConnection, error) {
+	return r.reachableFields(matching, kind, from, maxDepth, first, after)
 }
 
 // Validate is the resolver for the validate field.
@@ -335,6 +379,34 @@ func (r *schemaPathResolver) To(ctx context.Context, obj *model.SchemaPath) (mod
 // Segments is the resolver for the segments field.
 func (r *schemaPathResolver) Segments(ctx context.Context, obj *model.SchemaPath) ([]*model.PathSegment, error) {
 	return obj.Segments, nil
+}
+
+// Coordinates is the resolver for the coordinates field.
+func (r *schemaPathResolver) Coordinates(ctx context.Context, obj *model.SchemaPath) ([]string, error) {
+	coordinates := make([]string, 1, len(obj.Segments)+1)
+	coordinates[0] = obj.From.GetCoordinate()
+	for _, segment := range obj.Segments {
+		edge := r.edgeByID(segment.Edge.ID)
+		if edge == nil {
+			return nil, fmt.Errorf("unknown edge %q", segment.Edge.ID)
+		}
+		coordinates = append(coordinates, edge.Target.Coordinate)
+	}
+	return coordinates, nil
+}
+
+// EdgeKinds is the resolver for the edgeKinds field.
+func (r *schemaPathResolver) EdgeKinds(ctx context.Context, obj *model.SchemaPath) ([]model.ReferenceKind, error) {
+	kinds := make([]model.ReferenceKind, len(obj.Segments))
+	for i, segment := range obj.Segments {
+		kinds[i] = segment.Edge.Kind
+	}
+	return kinds, nil
+}
+
+// SuggestedDocument is the resolver for the suggestedDocument field.
+func (r *schemaPathResolver) SuggestedDocument(ctx context.Context, obj *model.SchemaPath) (*string, error) {
+	return r.suggestedDocument(obj)
 }
 
 // Sdl is the resolver for the sdl field.

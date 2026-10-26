@@ -12,7 +12,7 @@ type Query {
   element(coordinate: String!): SchemaElement
   elements(filter: String!, kinds: [ElementKind!], first: Int = 50): [SchemaElement!]!
   paths(from: String!, to: String!, traversal: PathTraversal = OUTPUT, maxDepth: Int = 8, first: Int = 100, after: String): SchemaPathConnection!
-  reachableFields(matching: String!, from: String, maxDepth: Int = 8, first: Int = 50, after: String): ReachableFieldConnection!
+  reachableFields(matching: String!, kind: OperationKind, from: String, maxDepth: Int = 8, first: Int = 50, after: String): ReachableFieldConnection!
   validate(document: String!): ValidationResult!
 }
 
@@ -52,6 +52,8 @@ type Operation {
   kind: OperationKind!
   description: String
   sdl(includeDescription: Boolean = false): String!
+  """Operation signature, directly referenced input types, and one level of output fields."""
+  shape: String!
   rootField: SchemaField!
   arguments: [SchemaInputValue!]!
   returnType: TypeRef!
@@ -128,6 +130,12 @@ type SchemaPath {
   depth: Int!
   fieldDepth: Int!
   segments: [PathSegment!]!
+  """Coordinates in traversal order, including both endpoints."""
+  coordinates: [String!]!
+  """Edge kinds in traversal order; one fewer than coordinates."""
+  edgeKinds: [ReferenceKind!]!
+  """Validated executable document for an output path from a root operation, when representable."""
+  suggestedDocument: String
 }
 type PathSegment { index: Int! edge: SchemaEdge! }
 type SchemaPathConnection { nodes: [SchemaPath!]! pageInfo: PageInfo! }

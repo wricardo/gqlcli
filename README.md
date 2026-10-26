@@ -478,7 +478,9 @@ gqlcli types -f compact
 ### Local GraphQL Schema Explorer
 
 `explore` accepts a GraphQL document **against the explorer's schema**, not the
-target API. Print that contract with `gqlcli explore --print-schema`; select a
+target API. Print the full contract with `gqlcli explore --print-schema`, or a
+smaller view of one root field with `gqlcli explore --print-schema-field reachableFields`
+(also available in inline CLIs). Select a
 target using `--env`, `--url`, `--header`, or `--schema-file` just as with
 `validate`. The document can come from a positional argument, `--query`, or
 `--query-file`; use `--variables` / `--variables-file` and `--operation` for
@@ -494,6 +496,31 @@ gqlcli explore --schema-file schema.graphql --format json \
 gqlcli explore --offline --format json \
   '{ operation(coordinate: "RootQuery.lead") { arguments { coordinate required } } }'
 ```
+
+For a compact answer, filter the operation kind and select only the fields you
+need. `shape` combines an operation signature with directly referenced input
+types and one level of return-type fields; it does not recursively expand
+fields on those return types.
+
+```bash
+gqlcli explore --schema-file schema.graphql \
+  '{ operation(coordinate: "RootMutation.createLead") { shape } }'
+gqlcli explore --schema-file schema.graphql \
+  '{ reachableFields(matching: "Lead.contactEmail", kind: QUERY, first: 5) {
+       nodes { operation { coordinate sdl } paths(first: 1) {
+         nodes { coordinates edgeKinds suggestedDocument }
+       } }
+       pageInfo { hasNextPage endCursor }
+     } }'
+```
+
+`SchemaPath.coordinates` lists both endpoints in order; `edgeKinds` lists the
+edges between them. `suggestedDocument` supplies a locally validated operation
+with variables for required arguments (and fragments for abstract types) when
+the path maps to an executable output selection. A composite terminal field
+selects `__typename`. An input-only path, a non-operation starting point, or
+another unrepresentable path returns `null`; no suggested document runs on the
+target. Supply variable **values** separately when executing a suggestion.
 
 `element` returns a concrete `SchemaElement`; select concrete-only relationships
 with inline fragments. Coordinates use actual target root names: `Lead`,
@@ -512,23 +539,10 @@ paths within `maxDepth` edges are ordered by edge count then edge ID sequence.
 `depth` counts graph edges; `fieldDepth` counts selected output fields once,
 including a terminal field. Recursive types do not repeat nodes within a path.
 
-```graphql
-{
-  reachableFields(matching: "email", first: 10, maxDepth: 8) {
-    nodes {
-      operation { coordinate }
-      target { coordinate }
-      paths(first: 2) {
-        nodes { depth fieldDepth segments { edge { kind source { coordinate } target { coordinate } } } }
-        pageInfo { hasNextPage endCursor }
-      }
-    }
-    pageInfo { hasNextPage endCursor }
-  }
-}
-```
-
-Outer `reachableFields` cursors page **operation/field pairs**, not paths.
+For detailed graph edges, select `segments { edge { kind source { coordinate }
+target { coordinate } } }` instead of the compact path fields. Outer
+`reachableFields` cursors page **operation/field pairs**, not paths; changing
+`kind`, `from`, `matching`, `maxDepth`, or `first` invalidates an outer cursor.
 Each pair's `paths(first:, after:)` cursor is independent and cannot be used
 for another pair. Path cursors bind the schema snapshot and query arguments;
 after a schema change, start pagination again. Exhaustive simple-path search

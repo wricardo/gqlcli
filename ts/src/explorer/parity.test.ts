@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { buildSchema, getIntrospectionQuery, graphqlSync } from "graphql";
+import { buildSchema, getIntrospectionQuery, graphqlSync, parse, validate } from "graphql";
 import { SchemaExplorer } from "../schema.ts";
 
 const root = join(import.meta.dirname, "../../..");
@@ -149,4 +149,141 @@ test("introspection-built explorer preserves argument descriptions and Go snapsh
   const goResult: unknown = JSON.parse(execFileSync(go!, ["explore", "--schema-file", fixture, document], { cwd: root, encoding: "utf8" }));
   const tsResult: unknown = JSON.parse(JSON.stringify(await SchemaExplorer.fromIntrospection({ __schema: introspection.data.__schema }).explore(document)));
   assert.deepEqual(tsResult, goResult);
+});
+
+test("Go/TypeScript filtered reachability binds cursors to operation kind and all query parameters", async () => {
+  const doc = `query($kind: OperationKind, $after: String) {
+    reachableFields(matching:"email", kind:$kind, maxDepth:5, first:1, after:$after) {
+      nodes { operation { coordinate kind } target { coordinate } paths(first:1) {
+        nodes { coordinates edgeKinds suggestedDocument } pageInfo { hasNextPage endCursor }
+      } }
+      pageInfo { hasNextPage endCursor }
+    }
+  }`;
+  for (const kind of ["QUERY", "MUTATION", "SUBSCRIPTION"] as const) {
+    const first = record(record((await equalExplorer(doc, { kind })).data).reachableFields);
+    const nodes = first.nodes as { operation: { kind: string } }[];
+    assert.ok(nodes.length, `expected ${kind} reachability`);
+    assert.ok(nodes.every((node) => node.operation.kind === kind));
+    const cursor = cursorFrom(first);
+    assert.ok(cursor);
+    const decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+    assert.equal(decoded.Kind, kind);
+    assert.deepEqual(Object.keys(decoded), ["Snapshot", "From", "Matching", "Kind", "Depth", "Position", "First"]);
+    await equalExplorer(doc, { kind, after: cursor });
+    const wrongKind = kind === "QUERY" ? "MUTATION" : "QUERY";
+    const mismatch = record(await equalExplorer(doc, { kind: wrongKind, after: cursor }));
+    assert.match(JSON.stringify(mismatch.errors), /reachability cursor does not match this query/);
+  }
+  const unfiltered = record(record((await equalExplorer(doc)).data).reachableFields);
+  const unfilteredCursor = cursorFrom(unfiltered);
+  assert.ok(unfilteredCursor);
+  assert.equal(JSON.parse(Buffer.from(unfilteredCursor, "base64url").toString("utf8")).Kind, "");
+  const mismatch = record(await equalExplorer(doc, { kind: "QUERY", after: unfilteredCursor }));
+  assert.match(JSON.stringify(mismatch.errors), /reachability cursor does not match this query/);
+});
+
+test("Go/TypeScript operation shapes include direct declarations in argument order without duplicates", async () => {
+  const result = record(record(await equalExplorer(`{
+    operations { coordinate sdl shape }
+    fromType: type(name:"CreateLeadInput") { sdl }
+    fromEnum: type(name:"LeadStatus") { sdl }
+    fromOutput: type(name:"Lead") { sdl }
+  }`)).data);
+  const operations = result.operations as { coordinate: string; sdl: string; shape: string }[];
+  const byCoordinate = Object.fromEntries(operations.map((operation) => [operation.coordinate, operation]));
+  assert.equal(byCoordinate["RootMutation.createLead"]?.shape,
+    [byCoordinate["RootMutation.createLead"]?.sdl, record(result.fromType).sdl, record(result.fromOutput).sdl].join("\n"));
+  assert.equal(byCoordinate["RootQuery.leads"]?.shape,
+    [byCoordinate["RootQuery.leads"]?.sdl, record(result.fromEnum).sdl, record(result.fromOutput).sdl].join("\n"));
+  assert.equal(byCoordinate["RootQuery.lead"]?.shape,
+    [byCoordinate["RootQuery.lead"]?.sdl, record(result.fromOutput).sdl].join("\n"));
+});
+
+test("Go/TypeScript compact paths and executable documents handle root types, fragments, terminals and unsupported edges", async () => {
+  const cases = [
+    { from: "RootQuery", to: "Lead.contactEmail", document: "query($v0_id: ID!) { lead(id: $v0_id) { contactEmail } }" },
+    { from: "RootQuery.lead", to: "RootQuery.lead", document: "query($v0_id: ID!) { lead(id: $v0_id) { __typename } }" },
+    { from: "RootQuery.search", to: "Agent.name", document: "query { search { ... on Agent { name } } }" },
+    { from: "RootQuery.lead", to: "Lead.manager", document: "query($v0_id: ID!) { lead(id: $v0_id) { manager { __typename } } }" },
+    { from: "RootQuery.leads", to: "Lead.status", document: "query { leads { status } }" },
+    { from: "RootMutation.createLead", to: "Lead.contactEmail", document: "mutation($v0_input: CreateLeadInput!) { createLead(input: $v0_input) { contactEmail } }" },
+    { from: "RootSubscription.leadUpdated", to: "Lead.contactEmail", document: "subscription($v0_id: ID!) { leadUpdated(id: $v0_id) { contactEmail } }" },
+    { from: "RootQuery.lead", to: "RootQuery.lead(id:)", traversal: "INPUT", document: null },
+    { from: "RootQuery.lead", to: "Lead", document: null },
+    { from: "Lead.contactEmail", to: "Lead.contactEmail", document: null },
+  ] as const;
+  const target = buildSchema(sdl);
+  for (const { from, to, document, ...options } of cases) {
+    const traversal = "traversal" in options ? `, traversal:${options.traversal}` : "";
+    const response = record(record(await equalExplorer(`{ paths(from:${JSON.stringify(from)}, to:${JSON.stringify(to)}${traversal}, maxDepth:8) {
+      nodes { from { coordinate } to { coordinate } depth coordinates edgeKinds suggestedDocument
+        segments { edge { kind source { coordinate } target { coordinate } } } }
+      pageInfo { hasNextPage endCursor }
+    } }`)).data);
+    const paths = record(response.paths).nodes as {
+      from: { coordinate: string }; to: { coordinate: string }; depth: number;
+      coordinates: string[]; edgeKinds: string[]; suggestedDocument: string | null;
+      segments: { edge: { kind: string; source: { coordinate: string }; target: { coordinate: string } } }[];
+    }[];
+    assert.ok(paths.length, `${from} -> ${to}`);
+    for (const path of paths) {
+      assert.deepEqual(path.coordinates, [from, ...path.segments.map((segment) => segment.edge.target.coordinate)]);
+      assert.deepEqual(path.edgeKinds, path.segments.map((segment) => segment.edge.kind));
+      assert.equal(path.coordinates.at(-1), to);
+      assert.equal(path.depth, path.edgeKinds.length);
+      if (path.suggestedDocument !== null) assert.deepEqual(validate(target, parse(path.suggestedDocument)), []);
+    }
+    if (from === "RootQuery") {
+      assert.ok(paths.some((path) => path.suggestedDocument === document), "root query paths should include the lead selection");
+    } else {
+      assert.equal(paths[0]!.suggestedDocument, document);
+    }
+  }
+});
+
+test("Go/TypeScript custom-root suggestions skip defaulted args, select abstract members and deduplicate shape types", async () => {
+  const customSDL = `schema { query: LookupQuery mutation: RootMutation subscription: RootSubscription }
+    type LookupQuery {
+      lead(id: ID!, optional: Int, page: Int! = 3): Lead!
+      search(term: String!): Search!
+      lookup: Result!
+      multi(first: Filter!, second: Filter!): Agent!
+    }
+    type RootMutation { setLead(id: ID!): Lead! }
+    type RootSubscription { watch: Lead! }
+    input Filter { term: String! }
+    type Lead { contactEmail: String! agent(id: ID!): Agent! }
+    interface Result { name: String! }
+    type Agent implements Result { name: String! rank: Int! }
+    union Search = Agent
+  `;
+  const schemaFile = join(work, "suggestion.graphql");
+  writeFileSync(schemaFile, customSDL);
+  const document = `{
+    lead: paths(from:"LookupQuery.lead", to:"Lead.contactEmail") { nodes { suggestedDocument coordinates edgeKinds } }
+    root: paths(from:"LookupQuery", to:"Lead.contactEmail") { nodes { suggestedDocument } }
+    nested: paths(from:"LookupQuery.lead", to:"Agent.rank") { nodes { suggestedDocument } }
+    union: paths(from:"LookupQuery.search", to:"Agent.name") { nodes { suggestedDocument } }
+    interface: paths(from:"LookupQuery.lookup", to:"Agent.rank") { nodes { suggestedDocument } }
+    mutation: paths(from:"RootMutation.setLead", to:"Lead.contactEmail") { nodes { suggestedDocument } }
+    subscription: paths(from:"RootSubscription.watch", to:"Lead.contactEmail") { nodes { suggestedDocument } }
+    filterShape: operation(coordinate:"LookupQuery.multi") { sdl shape }
+    multi: paths(from:"LookupQuery.multi", to:"Agent.rank") { nodes { suggestedDocument } }
+  }`;
+  const fromGo: unknown = JSON.parse(execFileSync(go!, ["explore", "--schema-file", schemaFile, "--format", "json", "--strict=false", document], { cwd: root, encoding: "utf8" }));
+  const fromTS: unknown = JSON.parse(JSON.stringify(await SchemaExplorer.fromSDL(customSDL).explore(document)));
+  assert.deepEqual(fromTS, fromGo);
+  const result = record(record(fromGo).data);
+  const suggestion = (key: string) => (record(result[key]).nodes as { suggestedDocument: string | null }[])[0]?.suggestedDocument;
+  assert.equal(suggestion("lead"), "query($v0_id: ID!) { lead(id: $v0_id) { contactEmail } }");
+  assert.equal(suggestion("root"), suggestion("lead"));
+  assert.equal(suggestion("nested"), "query($v0_id: ID!, $v1_id: ID!) { lead(id: $v0_id) { agent(id: $v1_id) { rank } } }");
+  assert.equal(suggestion("union"), "query($v0_term: String!) { search(term: $v0_term) { ... on Agent { name } } }");
+  assert.equal(suggestion("interface"), "query { lookup { ... on Agent { rank } } }");
+  assert.equal(suggestion("mutation"), "mutation($v0_id: ID!) { setLead(id: $v0_id) { contactEmail } }");
+  assert.equal(suggestion("subscription"), "subscription { watch { contactEmail } }");
+  assert.equal(suggestion("multi"), "query($v0_first: Filter!, $v0_second: Filter!) { multi(first: $v0_first, second: $v0_second) { rank } }");
+  const shape = record(result.filterShape);
+  assert.equal(shape.shape, `${shape.sdl}\ninput Filter {\n  term: String!\n}\ntype Agent implements Result {\n  name: String!\n  rank: Int!\n}`);
 });

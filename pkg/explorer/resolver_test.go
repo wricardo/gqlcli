@@ -98,7 +98,7 @@ func TestReachabilityPagesAndIndependentPaths(t *testing.T) {
 	from := "Query.people"
 	depth := 6
 	first := 1
-	outer, err := r.Query().ReachableFields(ctx, "Target.name", &from, &depth, &first, nil)
+	outer, err := r.Query().ReachableFields(ctx, "Target.name", nil, &from, &depth, &first, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,19 +123,19 @@ func TestReachabilityPagesAndIndependentPaths(t *testing.T) {
 		t.Fatal("missing outer cursor")
 	}
 	differentFrom := "Query.missing"
-	if _, err = r.Query().ReachableFields(ctx, "Target.name", &differentFrom, &depth, &first, outer.PageInfo.EndCursor); err == nil {
+	if _, err = r.Query().ReachableFields(ctx, "Target.name", nil, &differentFrom, &depth, &first, outer.PageInfo.EndCursor); err == nil {
 		t.Fatal("cursor accepted for a different query")
 	}
-	outerPage, err := r.Query().ReachableFields(ctx, "Target.", &from, &depth, &first, nil)
+	outerPage, err := r.Query().ReachableFields(ctx, "Target.", nil, &from, &depth, &first, nil)
 	if err != nil || !outerPage.PageInfo.HasNextPage || outerPage.PageInfo.EndCursor == nil {
 		t.Fatalf("outer page: %#v, %v", outerPage, err)
 	}
-	nextOuter, err := r.Query().ReachableFields(ctx, "Target.", &from, &depth, &first, outerPage.PageInfo.EndCursor)
+	nextOuter, err := r.Query().ReachableFields(ctx, "Target.", nil, &from, &depth, &first, outerPage.PageInfo.EndCursor)
 	if err != nil || len(nextOuter.Nodes) != 1 || nextOuter.Nodes[0].Target.Coordinate == outerPage.Nodes[0].Target.Coordinate {
 		t.Fatalf("next outer page: %#v, %v", nextOuter, err)
 	}
 	wider := 2
-	if _, err = r.Query().ReachableFields(ctx, "Target.", &from, &depth, &wider, outerPage.PageInfo.EndCursor); err == nil {
+	if _, err = r.Query().ReachableFields(ctx, "Target.", nil, &from, &depth, &wider, outerPage.PageInfo.EndCursor); err == nil {
 		t.Fatal("cursor accepted after page size changed")
 	}
 	changed, err := gqlparser.LoadSchema(&ast.Source{Input: testSchema + ` extend type Target { newer: String }`})
@@ -147,7 +147,7 @@ func TestReachabilityPagesAndIndependentPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	changedResolver := &Resolver{Index: index, Schema: changed}
-	if _, err = changedResolver.Query().ReachableFields(ctx, "Target.", &from, &depth, &first, outerPage.PageInfo.EndCursor); err == nil || !strings.Contains(err.Error(), "stale") {
+	if _, err = changedResolver.Query().ReachableFields(ctx, "Target.", nil, &from, &depth, &first, outerPage.PageInfo.EndCursor); err == nil || !strings.Contains(err.Error(), "stale") {
 		t.Fatalf("stale cursor error = %v", err)
 	}
 }

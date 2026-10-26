@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/urfave/cli/v2"
+	"github.com/vektah/gqlparser/v2/ast"
+	"github.com/vektah/gqlparser/v2/formatter"
+	"github.com/vektah/gqlparser/v2/parser"
 )
 
 // GetExploreCommand returns the local GraphQL schema exploration command.
@@ -18,11 +22,21 @@ func (b *CLIBuilder) GetExploreCommand() *cli.Command {
 			"On cache miss or expiry, target schema introspection may contact the endpoint. " +
 			"Use --offline to require an existing cache, or --schema-file for SDL on disk. " +
 			"Use 'schema refresh --env NAME' or --refresh-schema after a deploy. " +
-			"The explorer API is printed with --print-schema.",
+			"Print the full explorer API with --print-schema or a focused field view with --print-schema-field NAME.",
 		Flags: append(b.exploreFlags(), schemaFileFlag(),
 			&cli.BoolFlag{Name: "offline", Usage: "Require an existing cached introspection result; never contact the target"},
-			&cli.BoolFlag{Name: "print-schema", Usage: "Print the explorer's GraphQL schema and exit"}),
+			&cli.BoolFlag{Name: "print-schema", Usage: "Print the full explorer GraphQL schema and exit"},
+			&cli.StringFlag{Name: "print-schema-field", Usage: "Print a compact explorer schema for one Query root field and exit (e.g. paths)"}),
 		Action: func(c *cli.Context) error {
+			if c.IsSet("print-schema-field") {
+				field := c.String("print-schema-field")
+				sdl, err := explorerFieldSDL(field)
+				if err != nil {
+					return err
+				}
+				_, err = fmt.Fprint(c.App.Writer, sdl)
+				return err
+			}
 			if c.Bool("print-schema") {
 				_, err := fmt.Fprint(c.App.Writer, ExplorerSDL())
 				return err
@@ -128,4 +142,126 @@ func (b *CLIBuilder) exploreFlags() []cli.Flag {
 		}
 	}
 	return flags
+}
+
+// explorerFieldSDL prints a bounded SDL view of one explorer Query field. Deep
+// links in the graph (notably paths -> segments -> edges) remain navigable,
+// while cyclic type/field relationships do not pull in the entire contract.
+func explorerFieldSDL(name string) (string, error) {
+	doc, err := parser.ParseSchema(&ast.Source{Name: "explorer.graphqls", Input: ExplorerSDL()})
+	if err != nil {
+		return "", fmt.Errorf("parse explorer schema: %w", err)
+	}
+	definitions := make(map[string]*ast.Definition, len(doc.Definitions))
+	for _, definition := range doc.Definitions {
+		definitions[definition.Name] = definition
+	}
+	query := definitions["Query"]
+	if query == nil {
+		return "", fmt.Errorf("explorer schema has no Query type")
+	}
+	field := query.Fields.ForName(name)
+	if field == nil {
+		names := make([]string, 0, len(query.Fields))
+		for _, candidate := range query.Fields {
+			names = append(names, candidate.Name)
+		}
+		return "", fmt.Errorf("unknown explorer root field %q (available: %s)", name, strings.Join(names, ", "))
+	}
+
+	root := *query
+	root.Fields = ast.FieldList{field}
+	output := &ast.SchemaDocument{Definitions: ast.DefinitionList{&root}}
+	type pendingType struct {
+		name  string
+		depth int
+	}
+	pending := make([]pendingType, 0, 16)
+	addType := func(name string, depth int) {
+		if definition := definitions[name]; definition != nil && name != "Query" {
+			pending = append(pending, pendingType{name, depth})
+		}
+	}
+	addFieldTypes := func(field *ast.FieldDefinition, depth int) {
+		addType(field.Type.Name(), depth)
+		for _, arg := range field.Arguments {
+			addType(arg.Type.Name(), depth)
+		}
+	}
+	addFieldTypes(field, 1)
+	seen := map[string]bool{"Query": true}
+	for len(pending) > 0 {
+		next := pending[0]
+		pending = pending[1:]
+		if seen[next.name] {
+			continue
+		}
+		seen[next.name] = true
+		source := definitions[next.name]
+		definition := *source
+		if source.Kind == ast.Object || source.Kind == ast.Interface || source.Kind == ast.InputObject {
+			definition.Fields = nil
+			for _, child := range source.Fields {
+				childType := definitions[child.Type.Name()]
+				composite := childType != nil && (childType.Kind == ast.Object || childType.Kind == ast.Interface || childType.Kind == ast.Union)
+				if composite && !explorerScopedLink(next.name, child.Name, next.depth) {
+					continue
+				}
+				definition.Fields = append(definition.Fields, child)
+				addFieldTypes(child, next.depth+1)
+			}
+		}
+		for _, iface := range source.Interfaces {
+			addType(iface, next.depth+1)
+		}
+		for _, member := range source.Types {
+			addType(member, next.depth+1)
+		}
+		// An interface result can be selected with fragments on its concrete
+		// implementors, so expose their names and scalar fields as well.
+		if source.Kind == ast.Interface {
+			for _, candidate := range doc.Definitions {
+				for _, iface := range candidate.Interfaces {
+					if iface == source.Name {
+						addType(candidate.Name, next.depth+1)
+					}
+				}
+			}
+		}
+		output.Definitions = append(output.Definitions, &definition)
+	}
+	var result strings.Builder
+	formatter.NewFormatter(&result, formatter.WithIndent("  ")).FormatSchemaDocument(output)
+	return result.String(), nil
+}
+
+func explorerScopedLink(parent, field string, depth int) bool {
+	if depth >= 10 {
+		return false
+	}
+	// SchemaType is a hub that links back to nearly every explorer type.
+	// A direct lookup includes its declaration fields, but not graph navigation;
+	// indirect references only need its scalar identifiers and SDL.
+	if parent == "SchemaType" {
+		if depth > 1 {
+			return false
+		}
+		switch field {
+		case "fields", "inputFields", "enumValues", "possibleTypes", "interfaces":
+			return true
+		default:
+			return false
+		}
+	}
+	if depth < 3 {
+		return true
+	}
+	switch field {
+	case "nodes", "pageInfo", "segments", "edge", "source", "target",
+		"field", "inputValue", "operation", "paths", "type", "rootField",
+		"arguments", "returnType", "namedType", "ofType", "parentType":
+		return true
+	default:
+		return false
+	}
 }

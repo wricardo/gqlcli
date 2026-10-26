@@ -62,6 +62,8 @@ models:
     fields:
       sdl:
         resolver: true
+      shape:
+        resolver: true
       rootField:
         resolver: true
       arguments:
@@ -93,6 +95,12 @@ models:
       to:
         resolver: true
       segments:
+        resolver: true
+      coordinates:
+        resolver: true
+      edgeKinds:
+        resolver: true
+      suggestedDocument:
         resolver: true
   ReachableField:
     model:

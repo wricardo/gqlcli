@@ -64,9 +64,11 @@ Also exported: `GraphQLClient`, `SchemaExplorer` (from introspection or SDL), `e
 ### Local GraphQL schema explorer
 
 The explorer accepts a GraphQL document against the **explorer schema**, not
-the target API. Print its contract with `gqlcli explore --print-schema`; the
-canonical source is `pkg/explorer/schema.graphqls` in this repository, copied
-byte-for-byte into the npm package at build time.
+the target API. Print its contract with `gqlcli explore --print-schema`, or
+just one root field and the types needed to select it with
+`gqlcli explore --print-schema-field reachableFields`. The canonical source is
+`pkg/explorer/schema.graphqls` in this repository, copied byte-for-byte into
+the npm package at build time.
 
 ```ts
 import { Gqlcli, SchemaExplorer } from "@wricardo/gqlcli";
@@ -85,7 +87,11 @@ const result = await gql.explore(`
 const offline = SchemaExplorer.fromSDL(savedTargetSDL);
 const paths = await offline.explore(`{
   paths(from: "RootQuery", to: "Lead.email", maxDepth: 6, first: 10) {
-    nodes { depth fieldDepth segments { edge { kind source { coordinate } target { coordinate } } } }
+    nodes { coordinates edgeKinds suggestedDocument }
+    pageInfo { hasNextPage endCursor }
+  }
+  reachableFields(matching: "email", kind: QUERY, first: 10) {
+    nodes { operation { coordinate shape } target { coordinate } }
     pageInfo { hasNextPage endCursor }
   }
 }`);
@@ -118,15 +124,24 @@ simple paths within `maxDepth` are ordered by depth then edge identity.
 They may be exponentially numerous: paginate with `first`/`after`, use
 practical depth bounds, and handle explicit resource-limit errors.
 
-`reachableFields` paginates distinct (operation, field) pairs. Every node's
-`paths(first:, after:)` is **independent**: finishing the outer page does
-not fetch every nested path. Cursors bind the schema snapshot and query
-parameters; an inner cursor cannot be reused for another pair, and cursors
-from a refreshed schema are rejected. `sdl` is rendered on selection as
-canonical standalone SDL from metadata available in the schema. Descriptions
-are omitted by default, including descriptions of nested members; select
-`sdl(includeDescription: true)` to include them. Defaults, deprecations, and
-available directives are retained either way. An introspection cache cannot
+`reachableFields(matching:, kind:)` paginates distinct (operation, field) pairs;
+`kind` limits the roots to `QUERY`, `MUTATION`, or `SUBSCRIPTION`.
+Every node's `paths(first:, after:)` is **independent**: finishing the outer
+page does not fetch every nested path. Cursors bind the schema snapshot,
+operation kind, and query parameters; changing a filter or an inner path pair
+invalidates its cursor, and cursors from a refreshed schema are rejected.
+`SchemaPath.coordinates` includes both endpoints; `edgeKinds` lists the edges
+in traversal order. `suggestedDocument` is a validated executable operation
+for representable output paths starting at a root field or root type, with
+required arguments without defaults as variables and inline fragments for
+abstract types; it is `null` for paths that cannot become a selection.
+`Operation.shape` combines the field signature with SDL for its directly
+referenced argument and output types (no recursive type expansion). `sdl` is
+rendered on selection as canonical standalone SDL from metadata available in
+the schema.
+Descriptions are omitted by default, including descriptions of nested members;
+select `sdl(includeDescription: true)` to include them. Defaults, deprecations,
+and available directives are retained either way. An introspection cache cannot
 restore original whitespace or applied directives that introspection did not
 report.
 
@@ -149,7 +164,7 @@ byte-for-byte parity test.
 | `--jq`, `batch` (ndjson, array, `--batch-size`, `--jq`) | values | identical |
 | `script` results, `gql.each` and `strict` defaults | JSON, abort behavior | identical |
 | `validate` | verdict and `line:column` | identical |
-| `explore` (custom roots, entities, edges, SDL, paths, independent nested pagination) | complete JSON and cursors | identical on shared fixture |
+| `explore` (custom roots, entities, edges, SDL, shapes, compact paths, executable suggestions, kind-filtered reachability, independent nested pagination) | complete JSON and cursors | identical on shared fixture |
 
 ## Known differences
 

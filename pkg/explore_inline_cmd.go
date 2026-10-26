@@ -12,8 +12,17 @@ func (cs *InlineCommandSet) exploreCommand() *cli.Command {
 		Name:  "explore",
 		Usage: "Query the embedded executor's schema locally",
 		Flags: append(inlineOperationFlags("json"), &cli.StringFlag{Name: "operation", Usage: "Named explorer operation"},
-			&cli.BoolFlag{Name: "print-schema", Usage: "Print the explorer GraphQL schema"}),
+			&cli.BoolFlag{Name: "print-schema", Usage: "Print the explorer GraphQL schema"},
+			&cli.StringFlag{Name: "print-schema-field", Usage: "Print a compact explorer schema for one Query root field and exit (e.g. paths)"}),
 		Action: func(c *cli.Context) error {
+			if c.IsSet("print-schema-field") {
+				sdl, err := explorerFieldSDL(c.String("print-schema-field"))
+				if err != nil {
+					return err
+				}
+				_, err = fmt.Fprint(c.App.Writer, sdl)
+				return err
+			}
 			if c.Bool("print-schema") {
 				_, err := fmt.Fprint(c.App.Writer, ExplorerSDL())
 				return err
