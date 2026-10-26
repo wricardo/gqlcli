@@ -535,12 +535,16 @@ after a schema change, start pagination again. Exhaustive simple-path search
 can be exponential. Keep `maxDepth` small, page results, and expect an explicit
 resource-limit error if the requested search exceeds its safety budget.
 
-Explorer `sdl` renders each element's standalone declaration **on selection**,
-including metadata retained by the target schema. Introspection cannot recover
-original formatting or all applied directives, so this is canonical
-reconstruction rather than a byte-for-byte copy. `validate(document:)` checks
-an executable document against the cached *target* schema; it does not execute
-it. Neither explorer documents nor `validate` documents are sent to the target.
+Explorer `sdl` renders each element's standalone declaration **on selection**.
+Descriptions are omitted by default (including nested field, argument, input,
+and enum descriptions); request `sdl(includeDescription: true)` to include
+them. Defaults, deprecations, and available directives remain in either mode.
+For example, `operation(coordinate: "RootQuery.lead") { sdl }` returns a compact
+field signature. Introspection cannot recover original formatting or all
+applied directives, so this is canonical reconstruction rather than a
+byte-for-byte copy. `validate(document:)` checks an executable document
+against the cached *target* schema; it does not execute it. Neither explorer
+documents nor `validate` documents are sent to the target.
 On a missing or expired cache, fetching the target schema may send an
 introspection request. `--offline` requires an existing cache even if its TTL
 has expired; `--schema-file` requires no network. Refresh with

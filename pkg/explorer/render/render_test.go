@@ -96,14 +96,14 @@ READY @deprecated(reason: "retired")`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := render.Element(tt.elem)
+			got, err := render.Element(tt.elem, true)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if got != tt.want {
 				t.Errorf("SDL:\n%s\nwant:\n%s", got, tt.want)
 			}
-			again, err := render.Element(tt.elem)
+			again, err := render.Element(tt.elem, true)
 			if err != nil || again != got {
 				t.Errorf("repeat render = %q, %v; want %q", again, err, got)
 			}
@@ -128,6 +128,30 @@ READY @deprecated(reason: "retired")`},
 	}
 }
 
+func TestRenderWithoutDescriptions(t *testing.T) {
+	defs := sourceDefinitions(t)
+	product := defs.ForName("Product")
+	lookup := product.Fields.ForName("lookup")
+	tests := []struct {
+		element *graph.Element
+		want    string
+	}{
+		{&graph.Element{Kind: "TYPE", Coordinate: "Product", Definition: product}, `type Product implements Node @tag(label: "catalog") {
+  id: ID!
+  lookup(status: Status = READY @deprecated(reason: "changed"), limit: Int = 5): [Product!]! @deprecated(reason: "old") @tag(label: "lookup")
+}`},
+		{&graph.Element{Kind: "FIELD", Coordinate: "Product.lookup", Field: lookup}, `lookup(status: Status = READY @deprecated(reason: "changed"), limit: Int = 5): [Product!]! @deprecated(reason: "old") @tag(label: "lookup")`},
+		{&graph.Element{Kind: "INPUT_VALUE", Coordinate: "Product.lookup(status:)", InputValue: lookup.Arguments.ForName("status")}, `status: Status = READY @deprecated(reason: "changed")`},
+		{&graph.Element{Kind: "ENUM_VALUE", Coordinate: "Status.READY", EnumValue: defs.ForName("Status").EnumValues.ForName("READY")}, `READY @deprecated(reason: "retired")`},
+	}
+	for _, tt := range tests {
+		got, err := render.Element(tt.element, false)
+		if err != nil || got != tt.want {
+			t.Errorf("%s: got %q, %v; want %q", tt.element.Coordinate, got, err, tt.want)
+		}
+	}
+}
+
 func TestRenderEmptyAndInvalidElements(t *testing.T) {
 	tests := []struct {
 		name string
@@ -145,7 +169,7 @@ func TestRenderEmptyAndInvalidElements(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := render.Element(tt.elem)
+			got, err := render.Element(tt.elem, true)
 			if tt.err {
 				if err == nil || !strings.Contains(err.Error(), tt.want) {
 					t.Errorf("error = %v; want %q", err, tt.want)

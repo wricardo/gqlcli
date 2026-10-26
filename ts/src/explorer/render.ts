@@ -52,8 +52,8 @@ function directives(nodes: ReadonlyArray<ConstDirectiveNode> | undefined | null,
   return fallback;
 }
 
-function description(text: string | null | undefined, depth: number): string {
-  return text ? `${"  ".repeat(depth)}${quoted(text)}\n` : "";
+function description(text: string | null | undefined, depth: number, includeDescription: boolean): string {
+  return includeDescription && text ? `${"  ".repeat(depth)}${quoted(text)}\n` : "";
 }
 
 type InputValue = GraphQLArgument | GraphQLInputField;
@@ -75,29 +75,29 @@ function defaultValue(input: InputValue): string {
   return node ? ` = ${literal(node)}` : "";
 }
 
-function inputValue(input: InputValue, depth: number): string {
-  return `${description(input.description, depth)}${"  ".repeat(depth)}${input.name}: ${input.type}${defaultValue(input)}${directives(input.astNode?.directives, input.deprecationReason)}${depth ? "\n" : ""}`;
+function inputValue(input: InputValue, depth: number, includeDescription: boolean): string {
+  return `${description(input.description, depth, includeDescription)}${"  ".repeat(depth)}${input.name}: ${input.type}${defaultValue(input)}${directives(input.astNode?.directives, input.deprecationReason)}${depth ? "\n" : ""}`;
 }
 
-function field(value: GraphQLField<unknown, unknown>, depth: number): string {
+function field(value: GraphQLField<unknown, unknown>, depth: number, includeDescription: boolean): string {
   const args = value.args;
   let printedArgs = "";
   if (args.length) {
-    const multiline = args.some((arg) => !!arg.description);
+    const multiline = includeDescription && args.some((arg) => !!arg.description);
     printedArgs = multiline
-      ? `(\n${args.map((arg) => inputValue(arg, depth + 1)).join("")}${"  ".repeat(depth)})`
-      : `(${args.map((arg) => inputValue(arg, 0)).join(", ")})`;
+      ? `(\n${args.map((arg) => inputValue(arg, depth + 1, includeDescription)).join("")}${"  ".repeat(depth)})`
+      : `(${args.map((arg) => inputValue(arg, 0, includeDescription)).join(", ")})`;
   }
-  return `${description(value.description, depth)}${"  ".repeat(depth)}${value.name}${printedArgs}: ${value.type}${directives(value.astNode?.directives, value.deprecationReason)}\n`;
+  return `${description(value.description, depth, includeDescription)}${"  ".repeat(depth)}${value.name}${printedArgs}: ${value.type}${directives(value.astNode?.directives, value.deprecationReason)}\n`;
 }
 
-function enumValue(value: GraphQLEnumValue, depth: number): string {
-  return `${description(value.description, depth)}${"  ".repeat(depth)}${value.name}${directives(value.astNode?.directives, value.deprecationReason)}\n`;
+function enumValue(value: GraphQLEnumValue, depth: number, includeDescription: boolean): string {
+  return `${description(value.description, depth, includeDescription)}${"  ".repeat(depth)}${value.name}${directives(value.astNode?.directives, value.deprecationReason)}\n`;
 }
 
-function definition(value: GraphQLNamedType, elementDescription: string | null): string {
+function definition(value: GraphQLNamedType, elementDescription: string | null, includeDescription: boolean): string {
   const prefix = isScalarType(value) ? "scalar" : isObjectType(value) ? "type" : isInterfaceType(value) ? "interface" : isUnionType(value) ? "union" : isEnumType(value) ? "enum" : "input";
-  let rendered = `${description(elementDescription, 0)}${prefix} ${value.name}`;
+  let rendered = `${description(elementDescription, 0, includeDescription)}${prefix} ${value.name}`;
   if (isObjectType(value) || isInterfaceType(value)) {
     const interfaces = value.getInterfaces();
     if (interfaces.length) rendered += ` implements ${interfaces.map((entry) => entry.name).join(" & ")}`;
@@ -110,21 +110,21 @@ function definition(value: GraphQLNamedType, elementDescription: string | null):
   }
   let members = "";
   if (isObjectType(value) || isInterfaceType(value)) {
-    members = Object.values(value.getFields()).filter((member) => !member.name.startsWith("__")).map((member) => field(member, 1)).join("");
+    members = Object.values(value.getFields()).filter((member) => !member.name.startsWith("__")).map((member) => field(member, 1, includeDescription)).join("");
   } else if (isInputObjectType(value)) {
-    members = Object.values(value.getFields()).filter((member) => !member.name.startsWith("__")).map((member) => inputValue(member, 1)).join("");
+    members = Object.values(value.getFields()).filter((member) => !member.name.startsWith("__")).map((member) => inputValue(member, 1, includeDescription)).join("");
   } else if (isEnumType(value)) {
-    members = value.getValues().map((member) => enumValue(member, 1)).join("");
+    members = value.getValues().map((member) => enumValue(member, 1, includeDescription)).join("");
   }
   return members ? `${rendered} {\n${members}}` : rendered;
 }
 
 /** Render one declaration on demand, without storing SDL in the graph. */
-export function renderElement(element: ExplorerElement): string {
+export function renderElement(element: ExplorerElement, includeDescription = false): string {
   switch (element.kind) {
-    case "TYPE": return definition(element.value as GraphQLNamedType, element.description);
-    case "FIELD": return field(element.value as GraphQLField<unknown, unknown>, 0).slice(0, -1);
-    case "INPUT_VALUE": return inputValue(element.value as InputValue, 0);
-    case "ENUM_VALUE": return enumValue(element.value as GraphQLEnumValue, 0).slice(0, -1);
+    case "TYPE": return definition(element.value as GraphQLNamedType, element.description, includeDescription);
+    case "FIELD": return field(element.value as GraphQLField<unknown, unknown>, 0, includeDescription).slice(0, -1);
+    case "INPUT_VALUE": return inputValue(element.value as InputValue, 0, includeDescription);
+    case "ENUM_VALUE": return enumValue(element.value as GraphQLEnumValue, 0, includeDescription).slice(0, -1);
   }
 }

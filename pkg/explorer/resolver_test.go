@@ -74,7 +74,7 @@ func TestOperationsSearchEdgesAndSDL(t *testing.T) {
 	if err != nil || len(ops) != 1 || ops[0].Coordinate != "Query.people" {
 		t.Fatalf("operations: %#v, %v", ops, err)
 	}
-	rendered, err := r.Operation().Sdl(ctx, ops[0])
+	rendered, err := r.Operation().Sdl(ctx, ops[0], nil)
 	if err != nil || !strings.Contains(rendered, "people(limit: Int! = 5): People!") {
 		t.Fatalf("operation SDL: %q, %v", rendered, err)
 	}

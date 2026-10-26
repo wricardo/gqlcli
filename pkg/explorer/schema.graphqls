@@ -20,8 +20,8 @@ interface SchemaElement {
   coordinate: String!
   name: String!
   description: String
-  """Canonical standalone SDL; rendered only when selected."""
-  sdl: String!
+  """Canonical standalone SDL, rendered on selection; descriptions are opt-in."""
+  sdl(includeDescription: Boolean = false): String!
 }
 enum ElementKind { TYPE FIELD INPUT_VALUE ENUM_VALUE }
 enum OperationKind { QUERY MUTATION SUBSCRIPTION }
@@ -51,7 +51,7 @@ type Operation {
   coordinate: String!
   kind: OperationKind!
   description: String
-  sdl: String!
+  sdl(includeDescription: Boolean = false): String!
   rootField: SchemaField!
   arguments: [SchemaInputValue!]!
   returnType: TypeRef!
@@ -61,7 +61,7 @@ type SchemaType implements SchemaElement {
   coordinate: String!
   name: String!
   description: String
-  sdl: String!
+  sdl(includeDescription: Boolean = false): String!
   kind: TypeKind!
   fields(filter: String): [SchemaField!]!
   inputFields: [SchemaInputValue!]!
@@ -76,7 +76,7 @@ type SchemaField implements SchemaElement {
   coordinate: String!
   name: String!
   description: String
-  sdl: String!
+  sdl(includeDescription: Boolean = false): String!
   parentType: SchemaType!
   type: TypeRef!
   arguments: [SchemaInputValue!]!
@@ -87,7 +87,7 @@ type SchemaInputValue implements SchemaElement {
   coordinate: String!
   name: String!
   description: String
-  sdl: String!
+  sdl(includeDescription: Boolean = false): String!
   parentField: SchemaField
   parentInputType: SchemaType
   type: TypeRef!
@@ -100,7 +100,7 @@ type EnumValue implements SchemaElement {
   coordinate: String!
   name: String!
   description: String
-  sdl: String!
+  sdl(includeDescription: Boolean = false): String!
   parentType: SchemaType!
   isDeprecated: Boolean!
   deprecationReason: String

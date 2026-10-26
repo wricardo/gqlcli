@@ -53,7 +53,7 @@ type ComplexityRoot struct {
 		IsDeprecated      func(childComplexity int) int
 		Name              func(childComplexity int) int
 		ParentType        func(childComplexity int) int
-		Sdl               func(childComplexity int) int
+		Sdl               func(childComplexity int, includeDescription *bool) int
 	}
 
 	Operation struct {
@@ -65,7 +65,7 @@ type ComplexityRoot struct {
 		ReachableTypes func(childComplexity int, maxDepth *int) int
 		ReturnType     func(childComplexity int) int
 		RootField      func(childComplexity int) int
-		Sdl            func(childComplexity int) int
+		Sdl            func(childComplexity int, includeDescription *bool) int
 	}
 
 	PageInfo struct {
@@ -121,7 +121,7 @@ type ComplexityRoot struct {
 		IsDeprecated      func(childComplexity int) int
 		Name              func(childComplexity int) int
 		ParentType        func(childComplexity int) int
-		Sdl               func(childComplexity int) int
+		Sdl               func(childComplexity int, includeDescription *bool) int
 		Type              func(childComplexity int) int
 	}
 
@@ -135,7 +135,7 @@ type ComplexityRoot struct {
 		ParentField       func(childComplexity int) int
 		ParentInputType   func(childComplexity int) int
 		Required          func(childComplexity int) int
-		Sdl               func(childComplexity int) int
+		Sdl               func(childComplexity int, includeDescription *bool) int
 		Type              func(childComplexity int) int
 	}
 
@@ -180,7 +180,7 @@ type ComplexityRoot struct {
 		Operations    func(childComplexity int, kind *model.OperationKind) int
 		Outgoing      func(childComplexity int, kind *model.ReferenceKind) int
 		PossibleTypes func(childComplexity int) int
-		Sdl           func(childComplexity int) int
+		Sdl           func(childComplexity int, includeDescription *bool) int
 	}
 
 	SourceLocation struct {
@@ -222,11 +222,11 @@ type ComplexityRoot struct {
 }
 
 type EnumValueResolver interface {
-	Sdl(ctx context.Context, obj *model.EnumValue) (string, error)
+	Sdl(ctx context.Context, obj *model.EnumValue, includeDescription *bool) (string, error)
 	ParentType(ctx context.Context, obj *model.EnumValue) (*model.SchemaType, error)
 }
 type OperationResolver interface {
-	Sdl(ctx context.Context, obj *model.Operation) (string, error)
+	Sdl(ctx context.Context, obj *model.Operation, includeDescription *bool) (string, error)
 	RootField(ctx context.Context, obj *model.Operation) (*model.SchemaField, error)
 	Arguments(ctx context.Context, obj *model.Operation) ([]*model.SchemaInputValue, error)
 	ReturnType(ctx context.Context, obj *model.Operation) (*model.TypeRef, error)
@@ -256,13 +256,13 @@ type SchemaEdgeResolver interface {
 	InputValue(ctx context.Context, obj *model.SchemaEdge) (*model.SchemaInputValue, error)
 }
 type SchemaFieldResolver interface {
-	Sdl(ctx context.Context, obj *model.SchemaField) (string, error)
+	Sdl(ctx context.Context, obj *model.SchemaField, includeDescription *bool) (string, error)
 	ParentType(ctx context.Context, obj *model.SchemaField) (*model.SchemaType, error)
 	Type(ctx context.Context, obj *model.SchemaField) (*model.TypeRef, error)
 	Arguments(ctx context.Context, obj *model.SchemaField) ([]*model.SchemaInputValue, error)
 }
 type SchemaInputValueResolver interface {
-	Sdl(ctx context.Context, obj *model.SchemaInputValue) (string, error)
+	Sdl(ctx context.Context, obj *model.SchemaInputValue, includeDescription *bool) (string, error)
 	ParentField(ctx context.Context, obj *model.SchemaInputValue) (*model.SchemaField, error)
 	ParentInputType(ctx context.Context, obj *model.SchemaInputValue) (*model.SchemaType, error)
 	Type(ctx context.Context, obj *model.SchemaInputValue) (*model.TypeRef, error)
@@ -274,7 +274,7 @@ type SchemaPathResolver interface {
 	Segments(ctx context.Context, obj *model.SchemaPath) ([]*model.PathSegment, error)
 }
 type SchemaTypeResolver interface {
-	Sdl(ctx context.Context, obj *model.SchemaType) (string, error)
+	Sdl(ctx context.Context, obj *model.SchemaType, includeDescription *bool) (string, error)
 
 	Fields(ctx context.Context, obj *model.SchemaType, filter *string) ([]*model.SchemaField, error)
 	InputFields(ctx context.Context, obj *model.SchemaType) ([]*model.SchemaInputValue, error)
@@ -356,7 +356,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			break
 		}
 
-		return e.ComplexityRoot.EnumValue.Sdl(childComplexity), true
+		args, err := ec.field_EnumValue_sdl_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.EnumValue.Sdl(childComplexity, args["includeDescription"].(*bool)), true
 
 	case "Operation.arguments":
 		if e.ComplexityRoot.Operation.Arguments == nil {
@@ -416,7 +421,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			break
 		}
 
-		return e.ComplexityRoot.Operation.Sdl(childComplexity), true
+		args, err := ec.field_Operation_sdl_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Operation.Sdl(childComplexity, args["includeDescription"].(*bool)), true
 
 	case "PageInfo.endCursor":
 		if e.ComplexityRoot.PageInfo.EndCursor == nil {
@@ -694,7 +704,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			break
 		}
 
-		return e.ComplexityRoot.SchemaField.Sdl(childComplexity), true
+		args, err := ec.field_SchemaField_sdl_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.SchemaField.Sdl(childComplexity, args["includeDescription"].(*bool)), true
 	case "SchemaField.type":
 		if e.ComplexityRoot.SchemaField.Type == nil {
 			break
@@ -761,7 +776,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			break
 		}
 
-		return e.ComplexityRoot.SchemaInputValue.Sdl(childComplexity), true
+		args, err := ec.field_SchemaInputValue_sdl_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.SchemaInputValue.Sdl(childComplexity, args["includeDescription"].(*bool)), true
 	case "SchemaInputValue.type":
 		if e.ComplexityRoot.SchemaInputValue.Type == nil {
 			break
@@ -983,7 +1003,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			break
 		}
 
-		return e.ComplexityRoot.SchemaType.Sdl(childComplexity), true
+		args, err := ec.field_SchemaType_sdl_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.SchemaType.Sdl(childComplexity, args["includeDescription"].(*bool)), true
 
 	case "SourceLocation.column":
 		if e.ComplexityRoot.SourceLocation.Column == nil {
@@ -1208,6 +1233,17 @@ var parsedSchema = gqlparser.MustLoadSchema(sources...)
 
 // region    ***************************** args.gotpl *****************************
 
+func (ec *executionContext) field_EnumValue_sdl_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "includeDescription", ec.unmarshalOBoolean2ᚖbool)
+	if err != nil {
+		return nil, err
+	}
+	args["includeDescription"] = arg0
+	return args, nil
+}
+
 func (ec *executionContext) field_Operation_reachableTypes_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -1216,6 +1252,17 @@ func (ec *executionContext) field_Operation_reachableTypes_args(ctx context.Cont
 		return nil, err
 	}
 	args["maxDepth"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Operation_sdl_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "includeDescription", ec.unmarshalOBoolean2ᚖbool)
+	if err != nil {
+		return nil, err
+	}
+	args["includeDescription"] = arg0
 	return args, nil
 }
 
@@ -1467,6 +1514,28 @@ func (ec *executionContext) field_ReachableField_paths_args(ctx context.Context,
 	return args, nil
 }
 
+func (ec *executionContext) field_SchemaField_sdl_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "includeDescription", ec.unmarshalOBoolean2ᚖbool)
+	if err != nil {
+		return nil, err
+	}
+	args["includeDescription"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_SchemaInputValue_sdl_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "includeDescription", ec.unmarshalOBoolean2ᚖbool)
+	if err != nil {
+		return nil, err
+	}
+	args["includeDescription"] = arg0
+	return args, nil
+}
+
 func (ec *executionContext) field_SchemaType_fields_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -1508,6 +1577,17 @@ func (ec *executionContext) field_SchemaType_outgoing_args(ctx context.Context, 
 		return nil, err
 	}
 	args["kind"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_SchemaType_sdl_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "includeDescription", ec.unmarshalOBoolean2ᚖbool)
+	if err != nil {
+		return nil, err
+	}
+	args["includeDescription"] = arg0
 	return args, nil
 }
 
@@ -1657,7 +1737,8 @@ func (ec *executionContext) _EnumValue_sdl(ctx context.Context, field graphql.Co
 		field,
 		ec.fieldContext_EnumValue_sdl,
 		func(ctx context.Context) (any, error) {
-			return ec.Resolvers.EnumValue().Sdl(ctx, obj)
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.EnumValue().Sdl(ctx, obj, fc.Args["includeDescription"].(*bool))
 		},
 		nil,
 		ec.marshalNString2string,
@@ -1666,7 +1747,7 @@ func (ec *executionContext) _EnumValue_sdl(ctx context.Context, field graphql.Co
 	)
 }
 
-func (ec *executionContext) fieldContext_EnumValue_sdl(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_EnumValue_sdl(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "EnumValue",
 		Field:      field,
@@ -1675,6 +1756,17 @@ func (ec *executionContext) fieldContext_EnumValue_sdl(_ context.Context, field 
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
 		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_EnumValue_sdl_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
 	}
 	return fc, nil
 }
@@ -1917,7 +2009,8 @@ func (ec *executionContext) _Operation_sdl(ctx context.Context, field graphql.Co
 		field,
 		ec.fieldContext_Operation_sdl,
 		func(ctx context.Context) (any, error) {
-			return ec.Resolvers.Operation().Sdl(ctx, obj)
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Operation().Sdl(ctx, obj, fc.Args["includeDescription"].(*bool))
 		},
 		nil,
 		ec.marshalNString2string,
@@ -1926,7 +2019,7 @@ func (ec *executionContext) _Operation_sdl(ctx context.Context, field graphql.Co
 	)
 }
 
-func (ec *executionContext) fieldContext_Operation_sdl(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Operation_sdl(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Operation",
 		Field:      field,
@@ -1935,6 +2028,17 @@ func (ec *executionContext) fieldContext_Operation_sdl(_ context.Context, field 
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
 		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Operation_sdl_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
 	}
 	return fc, nil
 }
@@ -3582,7 +3686,8 @@ func (ec *executionContext) _SchemaField_sdl(ctx context.Context, field graphql.
 		field,
 		ec.fieldContext_SchemaField_sdl,
 		func(ctx context.Context) (any, error) {
-			return ec.Resolvers.SchemaField().Sdl(ctx, obj)
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.SchemaField().Sdl(ctx, obj, fc.Args["includeDescription"].(*bool))
 		},
 		nil,
 		ec.marshalNString2string,
@@ -3591,7 +3696,7 @@ func (ec *executionContext) _SchemaField_sdl(ctx context.Context, field graphql.
 	)
 }
 
-func (ec *executionContext) fieldContext_SchemaField_sdl(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_SchemaField_sdl(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "SchemaField",
 		Field:      field,
@@ -3600,6 +3705,17 @@ func (ec *executionContext) fieldContext_SchemaField_sdl(_ context.Context, fiel
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
 		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_SchemaField_sdl_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
 	}
 	return fc, nil
 }
@@ -3911,7 +4027,8 @@ func (ec *executionContext) _SchemaInputValue_sdl(ctx context.Context, field gra
 		field,
 		ec.fieldContext_SchemaInputValue_sdl,
 		func(ctx context.Context) (any, error) {
-			return ec.Resolvers.SchemaInputValue().Sdl(ctx, obj)
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.SchemaInputValue().Sdl(ctx, obj, fc.Args["includeDescription"].(*bool))
 		},
 		nil,
 		ec.marshalNString2string,
@@ -3920,7 +4037,7 @@ func (ec *executionContext) _SchemaInputValue_sdl(ctx context.Context, field gra
 	)
 }
 
-func (ec *executionContext) fieldContext_SchemaInputValue_sdl(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_SchemaInputValue_sdl(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "SchemaInputValue",
 		Field:      field,
@@ -3929,6 +4046,17 @@ func (ec *executionContext) fieldContext_SchemaInputValue_sdl(_ context.Context,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
 		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_SchemaInputValue_sdl_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
 	}
 	return fc, nil
 }
@@ -4953,7 +5081,8 @@ func (ec *executionContext) _SchemaType_sdl(ctx context.Context, field graphql.C
 		field,
 		ec.fieldContext_SchemaType_sdl,
 		func(ctx context.Context) (any, error) {
-			return ec.Resolvers.SchemaType().Sdl(ctx, obj)
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.SchemaType().Sdl(ctx, obj, fc.Args["includeDescription"].(*bool))
 		},
 		nil,
 		ec.marshalNString2string,
@@ -4962,7 +5091,7 @@ func (ec *executionContext) _SchemaType_sdl(ctx context.Context, field graphql.C
 	)
 }
 
-func (ec *executionContext) fieldContext_SchemaType_sdl(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_SchemaType_sdl(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "SchemaType",
 		Field:      field,
@@ -4971,6 +5100,17 @@ func (ec *executionContext) fieldContext_SchemaType_sdl(_ context.Context, field
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
 		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_SchemaType_sdl_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
 	}
 	return fc, nil
 }

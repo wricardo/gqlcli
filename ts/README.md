@@ -123,9 +123,12 @@ practical depth bounds, and handle explicit resource-limit errors.
 not fetch every nested path. Cursors bind the schema snapshot and query
 parameters; an inner cursor cannot be reused for another pair, and cursors
 from a refreshed schema are rejected. `sdl` is rendered on selection as
-canonical standalone SDL from metadata available in the schema; an
-introspection cache cannot restore original whitespace or applied directives
-that introspection did not report.
+canonical standalone SDL from metadata available in the schema. Descriptions
+are omitted by default, including descriptions of nested members; select
+`sdl(includeDescription: true)` to include them. Defaults, deprecations, and
+available directives are retained either way. An introspection cache cannot
+restore original whitespace or applied directives that introspection did not
+report.
 
 ## Parity with the Go CLI
 

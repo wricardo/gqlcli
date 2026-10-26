@@ -20,7 +20,7 @@ type Edge {
 		t.Fatal(err)
 	}
 	field := doc.Definitions.ForName("Edge").Fields.ForName("simple")
-	got, err := render.Element(&graph.Element{Kind: "FIELD", Field: field})
+	got, err := render.Element(&graph.Element{Kind: "FIELD", Field: field}, true)
 	if err != nil {
 		t.Fatal(err)
 	}

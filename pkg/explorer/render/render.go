@@ -12,7 +12,7 @@ import (
 
 // Element renders one graph element's declaration, not the whole schema. The
 // source AST is read without mutation, and no SDL is stored on the graph.
-func Element(e *graph.Element) (string, error) {
+func Element(e *graph.Element, includeDescription bool) (string, error) {
 	if e == nil {
 		return "", fmt.Errorf("render SDL: nil element")
 	}
@@ -23,23 +23,23 @@ func Element(e *graph.Element) (string, error) {
 		if e.Definition == nil {
 			return "", fmt.Errorf("render SDL for %q: missing type definition", e.Coordinate)
 		}
-		if err := definition(&b, e.Definition); err != nil {
+		if err := definition(&b, e.Definition, includeDescription); err != nil {
 			return "", fmt.Errorf("render SDL for %q: %w", e.Coordinate, err)
 		}
 	case "FIELD":
 		if e.Field == nil {
 			return "", fmt.Errorf("render SDL for %q: missing field definition", e.Coordinate)
 		}
-		if err := field(&b, e.Field, 0); err != nil {
+		if err := field(&b, e.Field, 0, includeDescription); err != nil {
 			return "", fmt.Errorf("render SDL for %q: %w", e.Coordinate, err)
 		}
 	case "INPUT_VALUE":
 		if e.InputValue != nil {
-			if err := inputValue(&b, e.InputValue, 0); err != nil {
+			if err := inputValue(&b, e.InputValue, 0, includeDescription); err != nil {
 				return "", fmt.Errorf("render SDL for %q: %w", e.Coordinate, err)
 			}
 		} else if e.Field != nil && e.Parent != nil && e.Parent.Kind == ast.InputObject {
-			if err := field(&b, e.Field, 0); err != nil {
+			if err := field(&b, e.Field, 0, includeDescription); err != nil {
 				return "", fmt.Errorf("render SDL for %q: %w", e.Coordinate, err)
 			}
 		} else {
@@ -49,15 +49,17 @@ func Element(e *graph.Element) (string, error) {
 		if e.EnumValue == nil {
 			return "", fmt.Errorf("render SDL for %q: missing enum value definition", e.Coordinate)
 		}
-		enumValue(&b, e.EnumValue, 0)
+		enumValue(&b, e.EnumValue, 0, includeDescription)
 	default:
 		return "", fmt.Errorf("render SDL for %q: unsupported element kind %q", e.Coordinate, e.Kind)
 	}
 	return strings.TrimSuffix(b.String(), "\n"), nil
 }
 
-func definition(b *strings.Builder, def *ast.Definition) error {
-	writeDescription(b, def.Description, 0)
+func definition(b *strings.Builder, def *ast.Definition, includeDescription bool) error {
+	if includeDescription {
+		writeDescription(b, def.Description, 0)
+	}
 	switch def.Kind {
 	case ast.Scalar:
 		b.WriteString("scalar ")
@@ -100,28 +102,30 @@ func definition(b *strings.Builder, def *ast.Definition) error {
 		if strings.HasPrefix(member.Name, "__") {
 			continue
 		}
-		if err := field(b, member, 1); err != nil {
+		if err := field(b, member, 1, includeDescription); err != nil {
 			return fmt.Errorf("field %q: %w", member.Name, err)
 		}
 	}
 	for _, member := range def.EnumValues {
-		enumValue(b, member, 1)
+		enumValue(b, member, 1, includeDescription)
 	}
 	b.WriteString("}\n")
 	return nil
 }
 
-func field(b *strings.Builder, f *ast.FieldDefinition, depth int) error {
+func field(b *strings.Builder, f *ast.FieldDefinition, depth int, includeDescription bool) error {
 	if f.Type == nil {
 		return fmt.Errorf("field %q has no type", f.Name)
 	}
-	writeDescription(b, f.Description, depth)
+	if includeDescription {
+		writeDescription(b, f.Description, depth)
+	}
 	indent(b, depth)
 	b.WriteString(f.Name)
 	if len(f.Arguments) != 0 {
 		multiLine := false
 		for _, arg := range f.Arguments {
-			if arg.Description != "" {
+			if includeDescription && arg.Description != "" {
 				multiLine = true
 				break
 			}
@@ -138,7 +142,7 @@ func field(b *strings.Builder, f *ast.FieldDefinition, depth int) error {
 			if i != 0 && !multiLine {
 				b.WriteString(", ")
 			}
-			if err := inputValue(b, arg, argDepth); err != nil {
+			if err := inputValue(b, arg, argDepth, includeDescription); err != nil {
 				return err
 			}
 		}
@@ -155,11 +159,13 @@ func field(b *strings.Builder, f *ast.FieldDefinition, depth int) error {
 	return nil
 }
 
-func inputValue(b *strings.Builder, arg *ast.ArgumentDefinition, depth int) error {
+func inputValue(b *strings.Builder, arg *ast.ArgumentDefinition, depth int, includeDescription bool) error {
 	if arg.Type == nil {
 		return fmt.Errorf("input value %q has no type", arg.Name)
 	}
-	writeDescription(b, arg.Description, depth)
+	if includeDescription {
+		writeDescription(b, arg.Description, depth)
+	}
 	indent(b, depth)
 	b.WriteString(arg.Name)
 	b.WriteString(": ")
@@ -172,8 +178,10 @@ func inputValue(b *strings.Builder, arg *ast.ArgumentDefinition, depth int) erro
 	return nil
 }
 
-func enumValue(b *strings.Builder, value *ast.EnumValueDefinition, depth int) {
-	writeDescription(b, value.Description, depth)
+func enumValue(b *strings.Builder, value *ast.EnumValueDefinition, depth int, includeDescription bool) {
+	if includeDescription {
+		writeDescription(b, value.Description, depth)
+	}
 	indent(b, depth)
 	b.WriteString(value.Name)
 	writeDirectives(b, value.Directives)

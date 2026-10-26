@@ -26,7 +26,7 @@ type ExplorerArgs = {
   coordinate: string; name: string; from: string; to: string; traversal: "OUTPUT" | "INPUT" | "ALL";
   first: number; maxDepth: number; matching: string; document: string;
   filter: string; kind?: string; kinds?: string[]; returns?: string; accepts?: string;
-  parentType?: string; returnType?: string; after?: string;
+  parentType?: string; returnType?: string; after?: string; includeDescription?: boolean;
 };
 type Operation = { __typename: "Operation"; name: string; coordinate: string; kind: string; description: string | null };
 type Reachable = { operation: Operation; target: ExplorerElement; depth: number };
@@ -269,7 +269,7 @@ export class ExplorerRuntime {
       const value = source as ExplorerElement | Operation;
       const e = this.element(value.coordinate);
       if (!e) throw new Error(`unknown element ${value.coordinate}`);
-      return renderElement(e);
+      return renderElement(e, args.includeDescription ?? false);
     }
     if (parent === "Operation") {
       const e = this.element((source as Operation).coordinate)!;

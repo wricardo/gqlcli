@@ -15,8 +15,8 @@ import (
 )
 
 // Sdl is the resolver for the sdl field.
-func (r *enumValueResolver) Sdl(ctx context.Context, obj *model.EnumValue) (string, error) {
-	return render.Element(r.element(obj.Coordinate))
+func (r *enumValueResolver) Sdl(ctx context.Context, obj *model.EnumValue, includeDescription *bool) (string, error) {
+	return render.Element(r.element(obj.Coordinate), includeDescription != nil && *includeDescription)
 }
 
 // ParentType is the resolver for the parentType field.
@@ -25,8 +25,8 @@ func (r *enumValueResolver) ParentType(ctx context.Context, obj *model.EnumValue
 }
 
 // Sdl is the resolver for the sdl field.
-func (r *operationResolver) Sdl(ctx context.Context, obj *model.Operation) (string, error) {
-	return render.Element(r.element(obj.Coordinate))
+func (r *operationResolver) Sdl(ctx context.Context, obj *model.Operation, includeDescription *bool) (string, error) {
+	return render.Element(r.element(obj.Coordinate), includeDescription != nil && *includeDescription)
 }
 
 // RootField is the resolver for the rootField field.
@@ -268,8 +268,8 @@ func (r *schemaEdgeResolver) InputValue(ctx context.Context, obj *model.SchemaEd
 }
 
 // Sdl is the resolver for the sdl field.
-func (r *schemaFieldResolver) Sdl(ctx context.Context, obj *model.SchemaField) (string, error) {
-	return render.Element(r.element(obj.Coordinate))
+func (r *schemaFieldResolver) Sdl(ctx context.Context, obj *model.SchemaField, includeDescription *bool) (string, error) {
+	return render.Element(r.element(obj.Coordinate), includeDescription != nil && *includeDescription)
 }
 
 // ParentType is the resolver for the parentType field.
@@ -292,8 +292,8 @@ func (r *schemaFieldResolver) Arguments(ctx context.Context, obj *model.SchemaFi
 }
 
 // Sdl is the resolver for the sdl field.
-func (r *schemaInputValueResolver) Sdl(ctx context.Context, obj *model.SchemaInputValue) (string, error) {
-	return render.Element(r.element(obj.Coordinate))
+func (r *schemaInputValueResolver) Sdl(ctx context.Context, obj *model.SchemaInputValue, includeDescription *bool) (string, error) {
+	return render.Element(r.element(obj.Coordinate), includeDescription != nil && *includeDescription)
 }
 
 // ParentField is the resolver for the parentField field.
@@ -338,8 +338,8 @@ func (r *schemaPathResolver) Segments(ctx context.Context, obj *model.SchemaPath
 }
 
 // Sdl is the resolver for the sdl field.
-func (r *schemaTypeResolver) Sdl(ctx context.Context, obj *model.SchemaType) (string, error) {
-	return render.Element(r.element(obj.Coordinate))
+func (r *schemaTypeResolver) Sdl(ctx context.Context, obj *model.SchemaType, includeDescription *bool) (string, error) {
+	return render.Element(r.element(obj.Coordinate), includeDescription != nil && *includeDescription)
 }
 
 // Fields is the resolver for the fields field.

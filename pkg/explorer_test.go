@@ -41,6 +41,51 @@ func TestSchemaExplorerCustomRootsAndTypeWrappers(t *testing.T) {
 	}
 }
 
+func TestSchemaExplorerSDLDescriptionOption(t *testing.T) {
+	fixture, err := os.ReadFile("../testdata/explorer/schema.graphql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	explorer, err := NewSchemaExplorerFromSDL(string(fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := explorer.Execute(context.Background(), `{
+		plain: operation(coordinate:"RootQuery.lead") { sdl }
+		documented: operation(coordinate:"RootQuery.lead") { sdl(includeDescription:true) }
+		explicit: operation(coordinate:"RootQuery.lead") { sdl(includeDescription:false) }
+		kind: type(name:"Person") { sdl sdlWithDocs:sdl(includeDescription:true) }
+		field: element(coordinate:"RootQuery.lead(id:)") { sdl sdlWithDocs:sdl(includeDescription:true) }
+		enumValue: element(coordinate:"LeadStatus.ARCHIVED") { sdl }
+	}`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if errors, ok := result["errors"]; ok {
+		t.Fatalf("explorer GraphQL errors: %v", errors)
+	}
+	data := result["data"].(map[string]interface{})
+	plain := data["plain"].(map[string]interface{})["sdl"]
+	if plain != "lead(id: ID!): Lead" || data["explicit"].(map[string]interface{})["sdl"] != plain {
+		t.Fatalf("undocumented SDL: %v", data)
+	}
+	documented := data["documented"].(map[string]interface{})["sdl"].(string)
+	if !strings.Contains(documented, `"Target lead identifier."`) || !strings.Contains(documented, "lead(\n") {
+		t.Fatalf("argument description missing: %s", documented)
+	}
+	kind := data["kind"].(map[string]interface{})
+	if kind["sdl"] != "interface Person {\n  id: ID!\n  name: String!\n}" || !strings.Contains(kind["sdlWithDocs"].(string), `"A person represented in an account."`) {
+		t.Fatalf("type description option: %v", kind)
+	}
+	arg := data["field"].(map[string]interface{})
+	if arg["sdl"] != "id: ID!" || !strings.Contains(arg["sdlWithDocs"].(string), `"Target lead identifier."`) {
+		t.Fatalf("input value description option: %v", arg)
+	}
+	if data["enumValue"].(map[string]interface{})["sdl"] != `ARCHIVED @deprecated(reason: "retired")` {
+		t.Fatalf("deprecation lost: %v", data["enumValue"])
+	}
+}
+
 func TestSchemaExplorerTargetValidationIsLocal(t *testing.T) {
 	fixture, err := os.ReadFile("../testdata/explorer/schema.graphql")
 	if err != nil {

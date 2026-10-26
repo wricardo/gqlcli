@@ -56,6 +56,19 @@ test("Go/TypeScript explorer entity identity, wrappers, roots and lazy SDL", asy
   }`, { c: "RootQuery.lead(id:)" });
 });
 
+test("Go/TypeScript SDL description option across entity kinds and aliases", async () => {
+  await equalExplorer(`query($docs: Boolean!) {
+    operation(coordinate:"RootQuery.lead") { compact:sdl described:sdl(includeDescription:$docs) }
+    type(name:"Person") { compact:sdl described:sdl(includeDescription:$docs) }
+    arg: element(coordinate:"RootQuery.lead(id:)") { compact:sdl described:sdl(includeDescription:$docs) }
+    value: element(coordinate:"LeadStatus.ARCHIVED") { sdl(includeDescription:$docs) }
+  }`, { docs: true });
+  await equalExplorer(`{
+    operation(coordinate:"RootQuery.lead") { compact:sdl explicit:sdl(includeDescription:false) }
+    type(name:"CreateLeadInput") { sdl }
+  }`);
+});
+
 test("Go/TypeScript graph edges and paginated paths", async () => {
   const doc = `query($after: String) {
     type(name:"Lead") { outgoing { id kind source { coordinate } target { coordinate } field { coordinate } } incoming { id kind } }

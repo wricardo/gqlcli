@@ -123,8 +123,8 @@ simple(flag: Boolean = false, note: String = "ctrl\\u0001"): Int @deprecated`],
 
 for (const [name, target, expected] of cases) {
   test(`Go renderer parity: ${name}`, () => {
-    assert.equal(renderElement(target), expected);
-    assert.equal(renderElement(target), expected);
+    assert.equal(renderElement(target, true), expected);
+    assert.equal(renderElement(target, true), expected);
     let document = expected;
     if (target.kind === "FIELD") document = `type Holder {\n${expected}\n}`;
     if (target.kind === "INPUT_VALUE") document = target.coordinate.endsWith(":)") ? `type Holder { f(${expected}): Boolean }` : `input Holder {\n${expected}\n}`;
@@ -133,9 +133,19 @@ for (const [name, target, expected] of cases) {
   });
 }
 
+test("SDL omits nested descriptions by default without dropping metadata", () => {
+  assert.equal(renderElement(element("TYPE", "Product", named("Product"))), `type Product implements Node @tag(label: "catalog") {
+  id: ID!
+  lookup(status: Status = READY @deprecated(reason: "changed"), limit: Int = 5): [Product!]! @deprecated(reason: "old") @tag(label: "lookup")
+}`);
+  assert.equal(renderElement(element("FIELD", "Product.lookup", lookup)), `lookup(status: Status = READY @deprecated(reason: "changed"), limit: Int = 5): [Product!]! @deprecated(reason: "old") @tag(label: "lookup")`);
+  assert.equal(renderElement(element("INPUT_VALUE", "Product.lookup(status:)", statusArg as GraphQLArgument)), `status: Status = READY @deprecated(reason: "changed")`);
+  assert.equal(renderElement(element("ENUM_VALUE", "Status.READY", statusValue as GraphQLEnumValue)), `READY @deprecated(reason: "retired")`);
+});
+
 test("SDL preserves nested literal formatting and Go JSON escapes", () => {
   const type = buildSchema(`type Query { f(a: String = "<>&\\u2028", obj: Settings = {enabled: true, tags: ["one", "two"]}): Boolean } input Settings { enabled: Boolean tags: [String!] }`).getQueryType()!;
-  const value = renderElement(element("FIELD", "Query.f", type.getFields()["f"]!));
+  const value = renderElement(element("FIELD", "Query.f", type.getFields()["f"]!), true);
   assert.equal(value, `f(a: String = "\\u003c\\u003e\\u0026\\u2028", obj: Settings = {enabled: true, tags: ["one", "two"]}): Boolean`);
 });
 

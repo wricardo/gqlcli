@@ -14,7 +14,7 @@ type SchemaElement interface {
 	GetCoordinate() string
 	GetName() string
 	GetDescription() *string
-	// Canonical standalone SDL; rendered only when selected.
+	// Canonical standalone SDL, rendered on selection; descriptions are opt-in.
 	GetSdl() string
 }
 
@@ -33,7 +33,7 @@ func (this EnumValue) GetCoordinate() string   { return this.Coordinate }
 func (this EnumValue) GetName() string         { return this.Name }
 func (this EnumValue) GetDescription() *string { return this.Description }
 
-// Canonical standalone SDL; rendered only when selected.
+// Canonical standalone SDL, rendered on selection; descriptions are opt-in.
 func (this EnumValue) GetSdl() string { return this.Sdl }
 
 type Operation struct {
@@ -92,7 +92,7 @@ func (this SchemaField) GetCoordinate() string   { return this.Coordinate }
 func (this SchemaField) GetName() string         { return this.Name }
 func (this SchemaField) GetDescription() *string { return this.Description }
 
-// Canonical standalone SDL; rendered only when selected.
+// Canonical standalone SDL, rendered on selection; descriptions are opt-in.
 func (this SchemaField) GetSdl() string { return this.Sdl }
 
 type SchemaInputValue struct {
@@ -114,7 +114,7 @@ func (this SchemaInputValue) GetCoordinate() string   { return this.Coordinate }
 func (this SchemaInputValue) GetName() string         { return this.Name }
 func (this SchemaInputValue) GetDescription() *string { return this.Description }
 
-// Canonical standalone SDL; rendered only when selected.
+// Canonical standalone SDL, rendered on selection; descriptions are opt-in.
 func (this SchemaInputValue) GetSdl() string { return this.Sdl }
 
 type SchemaOverview struct {
@@ -166,7 +166,7 @@ func (this SchemaType) GetCoordinate() string   { return this.Coordinate }
 func (this SchemaType) GetName() string         { return this.Name }
 func (this SchemaType) GetDescription() *string { return this.Description }
 
-// Canonical standalone SDL; rendered only when selected.
+// Canonical standalone SDL, rendered on selection; descriptions are opt-in.
 func (this SchemaType) GetSdl() string { return this.Sdl }
 
 type SourceLocation struct {
