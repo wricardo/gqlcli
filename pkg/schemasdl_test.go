@@ -386,3 +386,28 @@ func TestSchemaSDLAcceptsBareSchemaMap(t *testing.T) {
 		t.Fatalf("SchemaFromIntrospection with a bare __schema map: %v", err)
 	}
 }
+
+func TestSDLArgumentDescriptionsSurviveIntrospectionRebuild(t *testing.T) {
+	args := []interface{}{
+		map[string]interface{}{
+			"name": "limit", "description": "Maximum results per page.",
+			"type": map[string]interface{}{"kind": "SCALAR", "name": "Int"},
+		},
+		map[string]interface{}{
+			"name": "page",
+			"type": map[string]interface{}{"kind": "SCALAR", "name": "Int"},
+		},
+	}
+	rendered, err := sdlArgList(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := gqlparser.LoadSchema(&ast.Source{Input: "type Query { items" + rendered + ": String }"})
+	if err != nil {
+		t.Fatalf("rendered argument SDL did not parse: %v\n%s", err, rendered)
+	}
+	field := schema.Query.Fields.ForName("items")
+	if got := field.Arguments.ForName("limit").Description; got != "Maximum results per page." {
+		t.Fatalf("description after SDL rebuild = %q", got)
+	}
+}

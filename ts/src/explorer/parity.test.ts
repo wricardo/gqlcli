@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { buildSchema, getIntrospectionQuery, graphqlSync } from "graphql";
 import { SchemaExplorer } from "../schema.ts";
 
 const root = join(import.meta.dirname, "../../..");
@@ -119,4 +120,20 @@ test("Go/TypeScript abstract and input traversal, enum metadata and recursive pa
       pageInfo { hasNextPage endCursor }
     }
   }`);
+});
+
+test("introspection-built explorer preserves argument descriptions and Go snapshot", async () => {
+  const introspection = graphqlSync({ schema: buildSchema(sdl), source: getIntrospectionQuery({
+    descriptions: true, specifiedByUrl: true, directiveIsRepeatable: true,
+    schemaDescription: true, inputValueDeprecation: true, oneOf: true,
+  }) });
+  assert.equal(introspection.errors, undefined);
+  assert.ok(introspection.data?.__schema);
+  const document = `{ overview { snapshot queryCount typeCount }
+    operation(coordinate: "RootQuery.lead") { sdl arguments { coordinate description } }
+    type(name: "LeadStatus") { enumValues { coordinate isDeprecated deprecationReason } }
+  }`;
+  const goResult: unknown = JSON.parse(execFileSync(go!, ["explore", "--schema-file", fixture, document], { cwd: root, encoding: "utf8" }));
+  const tsResult: unknown = JSON.parse(JSON.stringify(await SchemaExplorer.fromIntrospection({ __schema: introspection.data.__schema }).explore(document)));
+  assert.deepEqual(tsResult, goResult);
 });

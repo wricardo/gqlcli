@@ -293,11 +293,13 @@ func writeMemberLine(b *strings.Builder, f map[string]interface{}) error {
 	return nil
 }
 
-// sdlArgList renders an argument list. Default values arrive from introspection
-// already encoded as GraphQL literals, so they are emitted verbatim; dropping
-// them would make a defaulted non-null argument look required.
+// sdlArgList renders argument descriptions when introspection supplies them.
+// Multiline argument definitions preserve descriptions when the SDL is loaded
+// back into gqlparser. Default values are already encoded GraphQL literals.
 func sdlArgList(args []interface{}) (string, error) {
 	parts := make([]string, 0, len(args))
+	descriptions := make([]string, 0, len(args))
+	multiline := false
 	for _, a := range args {
 		am, ok := a.(map[string]interface{})
 		if !ok {
@@ -311,12 +313,27 @@ func sdlArgList(args []interface{}) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("argument %q: %w", name, err)
 		}
-		parts = append(parts, name+": "+typeRef+sdlDefaultValue(am))
+		desc, _ := am["description"].(string)
+		if desc != "" {
+			multiline = true
+		}
+		descriptions = append(descriptions, desc)
+		parts = append(parts, name+": "+typeRef+sdlDefaultValue(am)+deprecatedSuffix(am))
 	}
 	if len(parts) == 0 {
 		return "", nil
 	}
-	return "(" + strings.Join(parts, ", ") + ")", nil
+	if !multiline {
+		return "(" + strings.Join(parts, ", ") + ")", nil
+	}
+	var b strings.Builder
+	b.WriteString("(\n")
+	for i, part := range parts {
+		writeDescription(&b, descriptions[i], "    ")
+		fmt.Fprintf(&b, "    %s\n", part)
+	}
+	b.WriteString("  )")
+	return b.String(), nil
 }
 
 func sdlDefaultValue(m map[string]interface{}) string {

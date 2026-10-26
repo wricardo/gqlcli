@@ -114,7 +114,10 @@ export class SchemaExplorer {
       const detail = "errors" in result && result.errors?.length ? `: ${result.errors[0]?.message}` : "";
       throw new Error(`introspection result has no schema${detail}`);
     }
-    return new SchemaExplorer(buildClientSchema(data as unknown as IntrospectionQuery));
+    // Go reconstructs a parsed schema from introspection SDL before indexing.
+    // Materialize the same applied metadata (notably @deprecated) so graph
+    // snapshot IDs and cursors agree across Go and TypeScript cache readers.
+    return SchemaExplorer.fromSDL(printSchema(buildClientSchema(data as unknown as IntrospectionQuery)));
   }
 
   /** From SDL text, e.g. the output of {@link sdl} saved to disk, for offline work. */

@@ -26,7 +26,10 @@ input CreateLeadInput {
 }
 
 type RootQuery {
-  lead(id: ID!): Lead
+  lead(
+    "Target lead identifier."
+    id: ID!
+  ): Lead
   leads(status: LeadStatus): [Lead!]!
   alternate: Agent
   search: [SearchResult!]!
