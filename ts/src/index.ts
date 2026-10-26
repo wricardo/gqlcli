@@ -3,6 +3,7 @@ export { GraphQLClient, mergeHeaders, defaultCacheDir, DEFAULT_SCHEMA_CACHE_TTL_
 export * from "./config.ts";
 export { SchemaExplorer, type OperationInfo, type OperationListOptions, type TypeInfo, type TypeListOptions, type DescribeOptions, type ValidationIssue, type ValidationResult } from "./schema.ts";
 export { ExplorerRuntime } from "./explorer/runtime.ts";
+export { explorerFieldSDL, explorerSDL } from "./explorer/sdl.ts";
 export { ExplorerGraph, type ExplorerElement, type ExplorerEdge, type ExplorerPath, type PathConnection } from "./explorer/graph.ts";
 export type { ExecutionResult as ExplorerExecutionResult } from "graphql";
 export { printTypeCompact, fieldSignature, type PrintOptions } from "./typeprint.ts";

@@ -94,3 +94,17 @@ test("a Pi Durable agent explores, queries and mutates through the tools", async
     }
   });
 });
+
+test("gql_explore prints explorer schema and runs explorer documents locally", async () => {
+  const tool = createGqlcliTools({ gqlcli: { url: "http://x", config: {} } }).find((t) => t.name === "gql_explore")!;
+  assert.equal(tool.replay, "safe");
+  const run = (args: object) => (tool as any).execute(args, { output() {} }, {});
+  const full = await run({ printSchema: true });
+  assert.match(full.output[0].text, /type Query/);
+  const field = await run({ printSchemaField: "paths" });
+  assert.match(field.output[0].text, /paths/);
+  assert.ok(field.output[0].text.length < full.output[0].text.length);
+  const bad = await run({ printSchemaField: "nope" });
+  assert.equal(bad.isError, true);
+  assert.equal((await run({})).isError, true);
+});

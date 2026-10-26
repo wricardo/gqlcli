@@ -475,25 +475,31 @@ gqlcli types --filter User --args --desc
 gqlcli types -f compact
 ```
 
-### Local GraphQL Schema Explorer
+### Advanced: Local GraphQL Schema Explorer
+
+For initial discovery, use `queries`, `mutations`, `types`, and `describe`
+instead. Use `explore` when you need graph traversal, reachability, paths, or
+suggested executable documents.
 
 `explore` accepts a GraphQL document **against the explorer's schema**, not the
-target API. Print the full contract with `gqlcli explore --print-schema`, or a
-smaller view of one root field with `gqlcli explore --print-schema-field reachableFields`
-(also available in inline CLIs). Select a
-target using `--env`, `--url`, `--header`, or `--schema-file` just as with
-`validate`. The document can come from a positional argument, `--query`, or
-`--query-file`; use `--variables` / `--variables-file` and `--operation` for
-variables and multi-operation documents. Unlike most commands, `explore`
-defaults to standard JSON so selected nullable fields remain `null`; choose
-`--format toon` explicitly for compact human/agent output.
+target API. The explorer's contract is embedded in the binary: print it with
+`gqlcli explore --print-schema`, or print one root field with
+`gqlcli explore --print-schema-field reachableFields` (also available in inline
+CLIs). With `--env`, `--url`, or `GRAPHQL_URL`, gqlcli introspects the target on
+a cache miss and builds the explorer in memory. No target schema file is needed.
+The document can come from a positional argument, `--query`, or `--query-file`;
+use `--variables` / `--variables-file` and `--operation` for variables and
+multi-operation documents. Unlike most commands, `explore` defaults to standard
+JSON so selected nullable fields remain `null`; choose `--format toon`
+explicitly for compact human/agent output.
 
 ```bash
-gqlcli explore --env prod --format json \
+gqlcli explore --print-schema-field reachableFields
+gqlcli explore --env prod \
   '{ overview { queryRoot { name } queryCount } }'
-gqlcli explore --schema-file schema.graphql --format json \
+gqlcli explore --env prod \
   '{ element(coordinate: "Lead.email") { __typename coordinate sdl ... on SchemaField { type { signature namedType { name } } } } }'
-gqlcli explore --offline --format json \
+gqlcli explore --env prod \
   '{ operation(coordinate: "RootQuery.lead") { arguments { coordinate required } } }'
 ```
 
@@ -503,9 +509,9 @@ types and one level of return-type fields; it does not recursively expand
 fields on those return types.
 
 ```bash
-gqlcli explore --schema-file schema.graphql \
+gqlcli explore --env prod \
   '{ operation(coordinate: "RootMutation.createLead") { shape } }'
-gqlcli explore --schema-file schema.graphql \
+gqlcli explore --env prod \
   '{ reachableFields(matching: "Lead.contactEmail", kind: QUERY, first: 5) {
        nodes { operation { coordinate sdl } paths(first: 1) {
          nodes { coordinates edgeKinds suggestedDocument }
@@ -560,9 +566,11 @@ byte-for-byte copy. `validate(document:)` checks an executable document
 against the cached *target* schema; it does not execute it. Neither explorer
 documents nor `validate` documents are sent to the target.
 On a missing or expired cache, fetching the target schema may send an
-introspection request. `--offline` requires an existing cache even if its TTL
-has expired; `--schema-file` requires no network. Refresh with
-`gqlcli schema refresh --env prod`, `--refresh-schema`, or clear the cache with
+introspection request. `--offline` optionally requires an existing cache even
+if its TTL has expired; `--schema-file` optionally loads saved target SDL
+without network access. Neither is needed for normal endpoint-backed use.
+Refresh with `gqlcli schema refresh --env prod`, `--refresh-schema`, or clear
+the cache with
 `gqlcli schema clear`. In contrast, `query`, `mutation`, and `subscribe`
 execute operations against the target API.
 

@@ -1,0 +1,680 @@
+
+"""
+gqlcli Schema Explorer
+
+A local, read-only GraphQL API for exploring a target GraphQL
+schema cached from introspection.
+
+Both the Go CLI and TypeScript library must expose the same
+schema and equivalent resolver behavior.
+"""
+
+schema {
+  query: Query
+}
+
+# ============================================================
+# ROOT API
+# ============================================================
+
+type Query {
+  """
+  Summary of the target schema.
+  """
+  overview: SchemaOverview!
+
+  """
+  Discover executable root operations.
+
+  'returns' matches the underlying named return type directly.
+  'accepts' matches directly declared argument types.
+  Neither performs transitive reachability.
+  """
+  operations(
+    kind: OperationKind
+    filter: String
+    returns: String
+    accepts: String
+    first: Int = 50
+  ): [Operation!]!
+
+  """
+  Retrieve an operation using its root field coordinate.
+
+  Examples:
+    Query.lead
+    Mutation.createLead
+    Subscription.leadUpdated
+
+  The actual root type name comes from the target schema.
+  """
+  operation(coordinate: String!): Operation
+
+  """
+  Discover named types.
+  """
+  types(
+    filter: String
+    kind: TypeKind
+    first: Int = 50
+  ): [SchemaType!]!
+
+  """
+  Retrieve a named type.
+  """
+  type(name: String!): SchemaType
+
+  """
+  Discover fields across the target schema.
+  """
+  fields(
+    filter: String!
+    parentType: String
+    returnType: String
+    first: Int = 50
+  ): [SchemaField!]!
+
+  """
+  Retrieve a field using its coordinate.
+
+  Example: Lead.email
+  """
+  field(coordinate: String!): SchemaField
+
+  """
+  Universal lookup for a schema element.
+
+  Examples:
+    Lead
+    Lead.email
+    Query.lead(id:)
+    CreateLeadInput.email
+    LeadStatus.NEW
+
+  Returns null when no such declaration exists.
+
+  Root fields resolve as SchemaField. Use operation()
+  for their Operation projection.
+  """
+  element(coordinate: String!): SchemaElement
+
+  """
+  Search all addressable schema elements.
+
+  Search results are deduplicated by coordinate.
+  Root fields are represented as SchemaField, not
+  duplicated as Operation objects.
+  """
+  elements(
+    filter: String!
+    kinds: [ElementKind!]
+    first: Int = 50
+  ): [SchemaElement!]!
+
+  """
+  Find all unique simple paths between two schema elements.
+
+  'from' and 'to' accept canonical schema coordinates.
+
+  Results include all qualifying paths, not only shortest paths.
+  Each page is ordered by graph depth and edge identity.
+
+  maxDepth counts graph edges, not GraphQL field selections.
+  """
+  paths(
+    from: String!
+    to: String!
+    traversal: PathTraversal = OUTPUT
+    maxDepth: Int = 8
+    first: Int = 100
+    after: String
+  ): SchemaPathConnection!
+
+  """
+  Find fields reachable from executable root operations.
+
+  Each result represents a unique (operation, target field)
+  pair. All distinct paths for that pair are accessible
+  through ReachableField.paths.
+  """
+  reachableFields(
+    matching: String!
+    from: String
+    maxDepth: Int = 8
+    first: Int = 50
+    after: String
+  ): ReachableFieldConnection!
+
+  """
+  Validate a GraphQL executable document against the
+  cached target schema. Does not execute the document.
+  """
+  validate(document: String!): ValidationResult!
+}
+
+# ============================================================
+# COMMON SCHEMA ELEMENT
+# ============================================================
+
+"""
+A declaration in the target GraphQL schema.
+
+Every implementation has a canonical coordinate and
+can render itself as standalone SDL.
+
+'sdl' is resolved on demand. It is not necessary to
+precompute SDL for all elements during schema loading.
+"""
+interface SchemaElement {
+  coordinate: String!
+  name: String!
+  description: String
+
+  """
+  Render this element as GraphQL Schema Definition Language.
+
+  The result represents this element's declaration,
+  not the entire target schema.
+
+  Examples:
+
+  SchemaType:
+    type Lead {
+      id: ID!
+      email: String
+    }
+
+  SchemaField:
+    lead(id: ID!): Lead
+
+  SchemaInputValue:
+    id: ID!
+
+  EnumValue:
+    ACTIVE
+  """
+  sdl: String!
+}
+
+# ============================================================
+# ENUMERATIONS
+# ============================================================
+
+enum ElementKind {
+  TYPE
+  FIELD
+  INPUT_VALUE
+  ENUM_VALUE
+}
+
+enum OperationKind {
+  QUERY
+  MUTATION
+  SUBSCRIPTION
+}
+
+enum TypeKind {
+  OBJECT
+  INPUT_OBJECT
+  INTERFACE
+  UNION
+  ENUM
+  SCALAR
+}
+
+"""
+The relationship represented by a graph edge.
+"""
+enum ReferenceKind {
+  DECLARES_FIELD
+  DECLARES_INPUT_VALUE
+  DECLARES_ENUM_VALUE
+  RETURNS
+  ACCEPTS
+  IMPLEMENTS
+  UNION_MEMBER
+}
+
+"""
+Controls which graph relationships are traversed.
+
+OUTPUT:
+  Field declarations, return types, interfaces, unions,
+  and enum values relevant to output selections.
+
+INPUT:
+  Input arguments, input object fields, and their types.
+
+ALL:
+  All supported graph relationships.
+"""
+enum PathTraversal {
+  OUTPUT
+  INPUT
+  ALL
+}
+
+# ============================================================
+# OVERVIEW
+# ============================================================
+
+type SchemaOverview {
+  queryCount: Int!
+  mutationCount: Int!
+  subscriptionCount: Int!
+
+  typeCount: Int!
+  fieldCount: Int!
+  inputTypeCount: Int!
+  enumCount: Int!
+  scalarCount: Int!
+
+  queryRoot: SchemaType
+  mutationRoot: SchemaType
+  subscriptionRoot: SchemaType
+}
+
+# ============================================================
+# OPERATIONS
+# ============================================================
+
+"""
+An executable root field viewed as a query, mutation,
+or subscription.
+
+Operation is a projection over a SchemaField.
+
+Its coordinate is identical to rootField.coordinate.
+It is not an additional canonical graph node.
+"""
+type Operation {
+  name: String!
+  coordinate: String!
+  kind: OperationKind!
+  description: String
+
+  """
+  Render the root operation field as SDL.
+
+  Example:
+    createLead(input: CreateLeadInput!): Lead!
+  """
+  sdl: String!
+
+  rootField: SchemaField!
+  arguments: [SchemaInputValue!]!
+  returnType: TypeRef!
+
+  """
+  Types reachable through output relationships from
+  the operation's return type.
+  """
+  reachableTypes(
+    maxDepth: Int = 8
+  ): [SchemaType!]!
+}
+
+# ============================================================
+# NAMED TYPES
+# ============================================================
+
+"""
+A named type in the target GraphQL schema.
+
+'sdl' renders the complete declaration, including its
+directly declared fields or members, descriptions,
+directives, and deprecation information when available.
+
+It does not recursively inline referenced type definitions.
+"""
+type SchemaType implements SchemaElement {
+  coordinate: String!
+  name: String!
+  description: String
+  sdl: String!
+
+  kind: TypeKind!
+
+  """
+  Fields directly declared on an OBJECT or INTERFACE.
+  Empty for other kinds.
+  """
+  fields(
+    filter: String
+  ): [SchemaField!]!
+
+  """
+  Input fields directly declared on an INPUT_OBJECT.
+  """
+  inputFields: [SchemaInputValue!]!
+
+  """
+  Values declared on an ENUM.
+  """
+  enumValues: [EnumValue!]!
+
+  """
+  Concrete object types represented by this
+  INTERFACE or UNION.
+  """
+  possibleTypes: [SchemaType!]!
+
+  """
+  Interfaces directly implemented by this type.
+  """
+  interfaces: [SchemaType!]!
+
+  """
+  Relationships originating from this type.
+  """
+  outgoing(
+    kind: ReferenceKind
+  ): [SchemaEdge!]!
+
+  """
+  Relationships pointing to this type.
+  """
+  incoming(
+    kind: ReferenceKind
+  ): [SchemaEdge!]!
+
+  """
+  Root operations whose direct named return type
+  is this type.
+  """
+  operations(
+    kind: OperationKind
+  ): [Operation!]!
+}
+
+# ============================================================
+# FIELDS
+# ============================================================
+
+"""
+A field declared on an OBJECT or INTERFACE.
+
+Coordinates follow the format:
+  ParentType.fieldName
+"""
+type SchemaField implements SchemaElement {
+  coordinate: String!
+  name: String!
+  description: String
+  sdl: String!
+
+  parentType: SchemaType!
+  type: TypeRef!
+
+  arguments: [SchemaInputValue!]!
+
+  isDeprecated: Boolean!
+  deprecationReason: String
+}
+
+# ============================================================
+# INPUT VALUES
+# ============================================================
+
+"""
+A field argument or input object field.
+
+Exactly one parent is populated.
+
+Argument coordinate:
+  Query.lead(id:)
+
+Input object field coordinate:
+  CreateLeadInput.email
+"""
+type SchemaInputValue implements SchemaElement {
+  coordinate: String!
+  name: String!
+  description: String
+  sdl: String!
+
+  parentField: SchemaField
+  parentInputType: SchemaType
+
+  type: TypeRef!
+  defaultValue: String
+  required: Boolean!
+
+  isDeprecated: Boolean!
+  deprecationReason: String
+}
+
+# ============================================================
+# ENUM VALUES
+# ============================================================
+
+"""
+An enum member.
+
+Coordinate example:
+  LeadStatus.ACTIVE
+"""
+type EnumValue implements SchemaElement {
+  coordinate: String!
+  name: String!
+  description: String
+  sdl: String!
+
+  parentType: SchemaType!
+
+  isDeprecated: Boolean!
+  deprecationReason: String
+}
+
+# ============================================================
+# TYPE REFERENCES
+# ============================================================
+
+"""
+A GraphQL type expression.
+
+The original wrapper structure is preserved through
+ofType, while namedType resolves to the underlying
+named type.
+
+For [Lead!]!:
+  signature = "[Lead!]!"
+  name = "Lead"
+  namedType = Lead
+  isNonNull = true
+  isList = false
+
+The first ofType is [Lead!], whose outermost wrapper
+is LIST.
+"""
+type TypeRef {
+  signature: String!
+
+  """
+  Name of the underlying named type.
+  """
+  name: String!
+
+  """
+  Kind of the underlying named type.
+  """
+  kind: TypeKind!
+
+  namedType: SchemaType!
+
+  """
+  Whether the outermost wrapper is LIST.
+  """
+  isList: Boolean!
+
+  """
+  Whether the outermost wrapper is NON_NULL.
+  """
+  isNonNull: Boolean!
+
+  """
+  Next inner type reference.
+
+  Null for a named type without wrappers.
+  """
+  ofType: TypeRef
+}
+
+# ============================================================
+# SCHEMA GRAPH
+# ============================================================
+
+"""
+A directed edge between two addressable schema elements.
+
+Edges have stable identities so distinct field references
+remain distinct, even when they connect the same types.
+"""
+type SchemaEdge {
+  """
+  Stable identifier for this relationship.
+
+  Must distinguish relationship kind, source, target,
+  and the declaration responsible for the relationship.
+  """
+  id: String!
+
+  kind: ReferenceKind!
+
+  source: SchemaElement!
+  target: SchemaElement!
+
+  """
+  Field responsible for this relationship, if applicable.
+  """
+  field: SchemaField
+
+  """
+  Input value responsible for this relationship,
+  if applicable.
+  """
+  inputValue: SchemaInputValue
+}
+
+# ============================================================
+# PATH EXPLORATION
+# ============================================================
+
+"""
+A unique simple path through the schema graph.
+
+No canonical graph node may appear more than once.
+
+Paths are distinct when their edge ID sequences differ,
+even if their type sequences are identical.
+"""
+type SchemaPath {
+  from: SchemaElement!
+  to: SchemaElement!
+
+  """
+  Number of graph edges traversed.
+  """
+  depth: Int!
+
+  """
+  Number of GraphQL output field selections represented
+  by the path.
+
+  Does not count structural DECLARES_FIELD edges separately.
+  Counts each selected field once, including the final
+  field when the path terminates at a SchemaField.
+
+  For INPUT-only paths, this is zero.
+  """
+  fieldDepth: Int!
+
+  segments: [PathSegment!]!
+}
+
+type PathSegment {
+  """
+  Zero-based position in the path.
+  """
+  index: Int!
+
+  edge: SchemaEdge!
+}
+
+type SchemaPathConnection {
+  nodes: [SchemaPath!]!
+  pageInfo: PageInfo!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  endCursor: String
+}
+
+# ============================================================
+# REACHABILITY
+# ============================================================
+
+"""
+One unique executable operation / target field pair.
+
+The path collection is paginated independently of
+the outer reachable-field collection.
+"""
+type ReachableField {
+  operation: Operation!
+  target: SchemaField!
+
+  """
+  All unique simple paths connecting the operation's
+  root field to the target field.
+
+  Uses the maxDepth inherited from reachableFields.
+  """
+  paths(
+    first: Int = 100
+    after: String
+  ): SchemaPathConnection!
+}
+
+type ReachableFieldConnection {
+  nodes: [ReachableField!]!
+  pageInfo: PageInfo!
+}
+
+# ============================================================
+# DOCUMENT VALIDATION
+# ============================================================
+
+type ValidationResult {
+  valid: Boolean!
+  errors: [ValidationDiagnostic!]!
+}
+
+type ValidationDiagnostic {
+  message: String!
+
+  """
+  Coordinate associated with the diagnostic.
+
+  May represent an invalid attempted selection that
+  does not exist in the schema.
+  """
+  coordinate: String
+
+  """
+  Resolved schema entities, when available.
+  """
+  field: SchemaField
+  inputValue: SchemaInputValue
+  expectedType: TypeRef
+
+  suggestions: [ValidationSuggestion!]!
+}
+
+type ValidationSuggestion {
+  message: String!
+
+  replacementField: SchemaField
+  replacementInputValue: SchemaInputValue
+}

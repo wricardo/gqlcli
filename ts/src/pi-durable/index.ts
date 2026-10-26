@@ -1,6 +1,8 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, section, type Extension, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
 import { executeBatch } from "../batch.ts";
+import { explorerFieldSDL, explorerSDL } from "../explorer/sdl.ts";
+import { jq as runJq } from "../jq.ts";
 import { formatOutput, OUTPUT_FORMATS, type OutputFormat } from "../format.ts";
 import { Gqlcli, type ExecutionResult, type GqlcliOptions } from "../gqlcli.ts";
 import { operationKind } from "../operation.ts";
@@ -34,7 +36,7 @@ const fail = (text: string): Out => ({ isError: true, output: [{ type: "text", t
 const Format = Type.Optional(Type.Union(OUTPUT_FORMATS.map((f) => Type.Literal(f)), { description: "Output encoding override" }));
 const Vars = Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "GraphQL variables" }));
 
-/** Tools mirroring the gqlcli commands: explore (queries, mutations, types, describe, sdl, validate), run (query, batch, subscribe, script, mutation). */
+/** Tools mirroring the gqlcli commands: explore (explore, queries, mutations, types, describe, sdl, validate), run (query, batch, subscribe, script, mutation). */
 export function createGqlcliTools(opts: GqlcliToolsOptions = {}): ToolRegistration[] {
   const p = opts.prefix ?? "gql_";
   const allowMutations = opts.mutations ?? false;
@@ -163,6 +165,33 @@ export function createGqlcliTools(opts: GqlcliToolsOptions = {}): ToolRegistrati
         const r = (await g().schema({ ...(ctx.abortSignal ? { signal: ctx.abortSignal } : {}) })).validate(a.query);
         if (r.valid) return ok("valid");
         return fail(r.errors.map((e) => `${e.line ?? "?"}:${e.column ?? "?"}: ${e.message}${e.schemaHint ? `\n${e.schemaHint}` : ""}`).join("\n\n"));
+      }),
+  });
+
+  const explore = defineTool({
+    name: `${p}explore`,
+    description:
+      "Run a GraphQL document against the local explorer schema (not the target API) to answer structural questions about the target schema, e.g. `paths` between types/operations, `reachableFields`, `operations`. Executed locally from the cached schema. Use printSchema or printSchemaField (e.g. `paths`) first to learn the explorer API.",
+    parameters: Type.Object({
+      query: Type.Optional(Type.String({ description: "Explorer GraphQL document" })),
+      variables: Vars,
+      operation: Type.Optional(Type.String({ description: "Operation to run in a multi-operation document" })),
+      printSchema: Type.Optional(Type.Boolean({ description: "Return the full explorer GraphQL schema instead of executing" })),
+      printSchemaField: Type.Optional(Type.String({ description: "Return a compact explorer schema for one Query root field (e.g. paths) instead of executing" })),
+      jq: Type.Optional(Type.String({ description: "jq program applied to the response (skipped when it has errors). Paths start at .data" })),
+      format: Format,
+    }),
+    replay: "safe",
+    execute: (a, _api, ctx) =>
+      guard(async () => {
+        if (a.printSchemaField) return ok(explorerFieldSDL(a.printSchemaField));
+        if (a.printSchema) return ok(explorerSDL());
+        if (!a.query) return fail("query is required unless printSchema or printSchemaField is set");
+        const res = await g().explore(a.query, a.variables as Record<string, unknown> | undefined, a.operation);
+        const hasErrors = !!res.errors?.length;
+        let body: unknown = res;
+        if (a.jq && !hasErrors) body = await runJq(res, a.jq);
+        return hasErrors ? fail(fmt(JSON.parse(JSON.stringify(res)), a.format)) : ok(fmt(JSON.parse(JSON.stringify(body)), a.format));
       }),
   });
 
@@ -299,7 +328,7 @@ export function createGqlcliTools(opts: GqlcliToolsOptions = {}): ToolRegistrati
       }),
   });
 
-  const list: ToolRegistration[] = [queries, mutationsList, types, describe, sdl, validate, query, batch, subscribeTool, script];
+  const list: ToolRegistration[] = [queries, mutationsList, types, describe, sdl, validate, explore, query, batch, subscribeTool, script];
   if (allowMutations) list.push(mutation);
   return list;
 }

@@ -44,6 +44,12 @@ export GRAPHQL_URL=https://api.example.com/graphql
 
 ## Explore the schema
 
+Start with `queries` / `mutations` to find entry points, `types` to narrow names
+or kinds, and `describe` for exact signatures and nearby types. These commands
+are the default for initial exploration; use `embed search` if names are unknown
+and semantic search is configured. Reserve `explore` for graph/path questions
+that these simpler commands cannot answer directly.
+
 ```bash
 gqlcli queries                          # list all query fields
 gqlcli queries --desc --args            # with descriptions and argument types
@@ -83,12 +89,34 @@ Depth behavior for describe:
 - Reverse-reference sections default to 5 top-level operation refs and 5 referencing schema types; pass `--max-op-refs 0 --max-field-refs 0` for no limit
 - When a reverse-reference section is capped, its header shows `(showing X of N)`
 
+### Advanced: graph exploration (`explore`)
+
+For schema reachability, paths, and suggested executable documents, use
+`explore` after initial discovery with `queries`, `mutations`, `types`, or
+`describe`. Its GraphQL API is embedded in the binary; `--print-schema` (or
+`--print-schema-field reachableFields`) shows the contract. Given an endpoint,
+gqlcli introspects the target on a cache miss and queries that schema locally.
+Explorer documents never execute on the target. No schema file is needed.
+
+```bash
+gqlcli explore --print-schema-field reachableFields
+gqlcli explore --env prod \
+  '{ reachableFields(matching: "User.email", kind: QUERY, first: 5) {
+       nodes { operation { coordinate } paths(first: 1) { nodes { suggestedDocument } } }
+     } }'
+```
+
+The document targets the explorer API, not the target API. Output defaults to
+JSON; `--schema-file` is optional for saved target SDL, and `--offline` requires
+a cached target schema. Use `--refresh-schema` after a target schema change.
+
 ### Schema cache
 
-Schema commands (`describe`, `queries`, `mutations`, `types`, `sdl`, `validate`, `embed`, and
-`query`/`mutation` schema hints) reuse the full introspection result cached on disk for 10 minutes,
-so repeated exploration costs one network round trip instead of one per command. The cache is
-keyed by URL + headers (auth-specific schemas never mix; header values are not written to disk).
+Schema commands (`describe`, `queries`, `mutations`, `types`, `sdl`, `validate`, `explore`,
+`embed`, and `query`/`mutation` schema hints) reuse the full introspection result cached on
+disk for 10 minutes, so repeated exploration costs one network round trip instead of one per
+command. The cache is keyed by URL + headers (auth-specific schemas never mix; header values
+are not written to disk).
 
 ```bash
 gqlcli describe Citizen --depth 1 --refresh-schema   # schema just deployed — ignore the cache
@@ -332,77 +360,6 @@ gqlcli script list
 gqlcli script show --name disable-inactive-users
 gqlcli script --op disable-inactive-users --arg '{"concurrency":10}'
 ```
-
-### Embedding the script runner in a Go program
-
-`ScriptRunner` runs the same scripts from inside a host program. Use the options whenever
-the script text is not human-written (e.g. authored by an AI agent):
-
-```go
-client := gqlcli.NewHTTPClient(&gqlcli.Config{URL: endpoint})
-runner := gqlcli.NewScriptRunner(client,
-    gqlcli.WithStdout(&logs), gqlcli.WithStderr(&logs), // keep console.log off your stdout
-    gqlcli.WithTimeout(30*time.Second),                 // interrupts `while(true){}`
-    gqlcli.WithReadOnly(true),                          // reject all mutations
-    gqlcli.WithMaxOperations(200),                      // cap a runaway gql.each
-    gqlcli.WithApprover(approve),                       // per-operation gate
-    gqlcli.WithOnRequest(trace),                        // execution trace
-    gqlcli.WithOnResponse(traceResult),
-)
-result, err := runner.RunSource(ctx, "agent.js", source, "run", input)
-errors.Is(err, gqlcli.ErrScriptInterrupted) // cancelled/timed out vs. a script bug
-```
-
-- No options = current CLI behavior (process stdio, no policy).
-- The context interrupts the JS VM itself, not just in-flight HTTP calls.
-- `WithReadOnly`/`WithApprover` classify by **parsing the document**, not by which helper was
-  called — so `gql.query("mutation Evil { ... }")` is blocked, while a query containing the
-  word "mutation" in a string literal is not. An unparseable document is refused, not sent,
-  whenever a policy is active. Rejections are catchable throws in JS.
-- `RequireOperationKind(doc, kind)` / `DocumentOperationKind(doc)` apply the same check to
-  documents the host dispatches itself.
-- Callbacks get a copy of `RequestInfo.Variables` — a hook cannot change what is sent — and
-  within one run are called from a single goroutine, so they need no locking. Concurrent
-  `RunSource` calls on a shared runner do run in parallel.
-- `NewScriptRunner` takes `OperationExecutor` (just `Execute` + `ExecuteMutation`), so an
-  in-house client needs no `Introspect`/`LastResponseMetadata` stubs.
-- `LimitWriter(w, n)` caps captured console output — bounding memory during the run, unlike
-  trimming the buffer afterwards. `Truncated()` reports whether anything was dropped.
-- `ProjectConfig.ResolveScript(name)` + `(*NamedScript).MergeInput(input)` reuse scripts
-  saved in `.gqlcli.json`.
-
-### Running scripts in-process (no HTTP)
-
-`NewInlineClient` adapts an `InlineExecutor` to `Client`, so a gqlgen app runs the same
-scripts against its own schema with no server:
-
-```go
-client := gqlcli.NewInlineClient(gqlcli.NewInlineExecutor(schema))
-runner := gqlcli.NewScriptRunner(client, gqlcli.WithReadOnly(true))
-d := client.Describer() // schema discovery against the same in-process schema
-```
-
-`ExecutionMode` is ignored (an inline client is already one transport) and
-`LastResponseMetadata` is nil (no HTTP response).
-
-`HTTPClient`, `InlineClient` and `ScriptRunner` are all safe to share across goroutines;
-`LastResponseMetadata()` is only well-defined for serial use.
-
-### Schema discovery from a Go program
-
-`Describer` caches introspection per type and renders compact SDL — the piece to use when a
-model must read the schema before writing a query.
-
-```go
-d := gqlcli.NewDescriberFromExecFunc(house.DoRaw) // func(ctx, query, vars) (json.RawMessage, error)
-sdl, err := d.DescribeWithOptions(ctx, "Query", gqlcli.DescribeOptions{FieldFilter: "campaign", ShowArgs: true})
-```
-
-- The exec func must return the full response envelope (with `data`), not just the payload.
-- `FieldFilter` matches fields, **input fields and enum values**, so it works on input types
-  and enums too; it returns `""` when nothing matches. `Depth` follows only surviving fields.
-- `DescribeWithFieldFilter` is not this — it backs schema-hint errors, fixes its own
-  formatting and looks at `fields` only. Use `DescribeWithOptions` for general filtering.
 
 ## Subscribe to events
 
