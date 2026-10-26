@@ -73,6 +73,11 @@ func (e *InlineExecutor) Schema() *ast.Schema {
 
 // Execute runs a GraphQL query or mutation and returns the raw JSON response.
 func (e *InlineExecutor) Execute(ctx context.Context, query string, variables map[string]interface{}) (json.RawMessage, error) {
+	return e.ExecuteOperation(ctx, query, variables, "")
+}
+
+// ExecuteOperation selects a named operation in a multi-operation document.
+func (e *InlineExecutor) ExecuteOperation(ctx context.Context, query string, variables map[string]interface{}, operationName string) (json.RawMessage, error) {
 	if e.enrich != nil {
 		ctx = e.enrich(ctx)
 	}
@@ -80,6 +85,9 @@ func (e *InlineExecutor) Execute(ctx context.Context, query string, variables ma
 	body := map[string]interface{}{"query": query}
 	if variables != nil {
 		body["variables"] = variables
+	}
+	if operationName != "" {
+		body["operationName"] = operationName
 	}
 	reqJSON, err := json.Marshal(body)
 	if err != nil {

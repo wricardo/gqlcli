@@ -12,11 +12,13 @@ import {
   parse,
   printSchema,
   validate,
+  type ExecutionResult,
   type GraphQLNamedType,
   type GraphQLObjectType,
   type GraphQLSchema,
   type IntrospectionQuery,
 } from "graphql";
+import { ExplorerRuntime } from "./explorer/runtime.ts";
 import type { GraphQLClient, RequestOptions } from "./client.ts";
 import {
   fieldScore,
@@ -98,6 +100,7 @@ function kindOf(t: GraphQLNamedType): string {
 export class SchemaExplorer {
   readonly schema: GraphQLSchema;
   readonly roots: { query?: GraphQLObjectType | null; mutation?: GraphQLObjectType | null; subscription?: GraphQLObjectType | null };
+  private explorerRuntime: ExplorerRuntime | undefined;
 
   constructor(schema: GraphQLSchema) {
     this.schema = schema;
@@ -121,6 +124,12 @@ export class SchemaExplorer {
 
   static async fromClient(client: GraphQLClient, o: RequestOptions = {}): Promise<SchemaExplorer> {
     return SchemaExplorer.fromIntrospection(await client.introspect(o));
+  }
+
+  /** Execute a GraphQL explorer document against this cached schema, entirely locally. */
+  explore(document: string, variables?: Record<string, unknown>, operationName?: string): Promise<ExecutionResult> {
+    this.explorerRuntime ??= new ExplorerRuntime(this.schema);
+    return this.explorerRuntime.explore(document, variables, operationName);
   }
 
   /** `gqlcli queries` / `mutations` / subscriptions. */

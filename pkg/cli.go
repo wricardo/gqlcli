@@ -868,6 +868,7 @@ func (b *CLIBuilder) RegisterCommands(app *cli.App) {
 		b.GetMutationCommand(),
 		b.GetSubscribeCommand(),
 		b.GetValidateCommand(),
+		b.GetExploreCommand(),
 		b.GetSdlCommand(),
 		b.GetBatchCommand(),
 		b.GetTypesCommand(),

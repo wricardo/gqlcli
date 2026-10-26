@@ -1,0 +1,157 @@
+"""Local read-only exploration of a cached target GraphQL schema."""
+schema { query: Query }
+
+type Query {
+  overview: SchemaOverview!
+  operations(kind: OperationKind, filter: String, returns: String, accepts: String, first: Int = 50): [Operation!]!
+  operation(coordinate: String!): Operation
+  types(filter: String, kind: TypeKind, first: Int = 50): [SchemaType!]!
+  type(name: String!): SchemaType
+  fields(filter: String!, parentType: String, returnType: String, first: Int = 50): [SchemaField!]!
+  field(coordinate: String!): SchemaField
+  element(coordinate: String!): SchemaElement
+  elements(filter: String!, kinds: [ElementKind!], first: Int = 50): [SchemaElement!]!
+  paths(from: String!, to: String!, traversal: PathTraversal = OUTPUT, maxDepth: Int = 8, first: Int = 100, after: String): SchemaPathConnection!
+  reachableFields(matching: String!, from: String, maxDepth: Int = 8, first: Int = 50, after: String): ReachableFieldConnection!
+  validate(document: String!): ValidationResult!
+}
+
+interface SchemaElement {
+  coordinate: String!
+  name: String!
+  description: String
+  """Canonical standalone SDL; rendered only when selected."""
+  sdl: String!
+}
+enum ElementKind { TYPE FIELD INPUT_VALUE ENUM_VALUE }
+enum OperationKind { QUERY MUTATION SUBSCRIPTION }
+enum TypeKind { OBJECT INPUT_OBJECT INTERFACE UNION ENUM SCALAR }
+enum ReferenceKind {
+  DECLARES_FIELD DECLARES_INPUT_VALUE DECLARES_ENUM_VALUE RETURNS ACCEPTS IMPLEMENTS UNION_MEMBER POSSIBLE_TYPE
+}
+"""OUTPUT follows declaration/return/possible-type/union/enum edges; INPUT follows input declarations/references; ALL follows every directed edge."""
+enum PathTraversal { OUTPUT INPUT ALL }
+
+type SchemaOverview {
+  snapshot: String!
+  queryCount: Int!
+  mutationCount: Int!
+  subscriptionCount: Int!
+  typeCount: Int!
+  fieldCount: Int!
+  inputTypeCount: Int!
+  enumCount: Int!
+  scalarCount: Int!
+  queryRoot: SchemaType
+  mutationRoot: SchemaType
+  subscriptionRoot: SchemaType
+}
+type Operation {
+  name: String!
+  coordinate: String!
+  kind: OperationKind!
+  description: String
+  sdl: String!
+  rootField: SchemaField!
+  arguments: [SchemaInputValue!]!
+  returnType: TypeRef!
+  reachableTypes(maxDepth: Int = 8): [SchemaType!]!
+}
+type SchemaType implements SchemaElement {
+  coordinate: String!
+  name: String!
+  description: String
+  sdl: String!
+  kind: TypeKind!
+  fields(filter: String): [SchemaField!]!
+  inputFields: [SchemaInputValue!]!
+  enumValues: [EnumValue!]!
+  possibleTypes: [SchemaType!]!
+  interfaces: [SchemaType!]!
+  outgoing(kind: ReferenceKind): [SchemaEdge!]!
+  incoming(kind: ReferenceKind): [SchemaEdge!]!
+  operations(kind: OperationKind): [Operation!]!
+}
+type SchemaField implements SchemaElement {
+  coordinate: String!
+  name: String!
+  description: String
+  sdl: String!
+  parentType: SchemaType!
+  type: TypeRef!
+  arguments: [SchemaInputValue!]!
+  isDeprecated: Boolean!
+  deprecationReason: String
+}
+type SchemaInputValue implements SchemaElement {
+  coordinate: String!
+  name: String!
+  description: String
+  sdl: String!
+  parentField: SchemaField
+  parentInputType: SchemaType
+  type: TypeRef!
+  defaultValue: String
+  required: Boolean!
+  isDeprecated: Boolean!
+  deprecationReason: String
+}
+type EnumValue implements SchemaElement {
+  coordinate: String!
+  name: String!
+  description: String
+  sdl: String!
+  parentType: SchemaType!
+  isDeprecated: Boolean!
+  deprecationReason: String
+}
+type TypeRef {
+  signature: String!
+  name: String!
+  kind: TypeKind!
+  namedType: SchemaType!
+  isList: Boolean!
+  isNonNull: Boolean!
+  ofType: TypeRef
+}
+type SchemaEdge {
+  id: String!
+  kind: ReferenceKind!
+  source: SchemaElement!
+  target: SchemaElement!
+  field: SchemaField
+  inputValue: SchemaInputValue
+}
+type SchemaPath {
+  from: SchemaElement!
+  to: SchemaElement!
+  depth: Int!
+  fieldDepth: Int!
+  segments: [PathSegment!]!
+}
+type PathSegment { index: Int! edge: SchemaEdge! }
+type SchemaPathConnection { nodes: [SchemaPath!]! pageInfo: PageInfo! }
+type PageInfo { hasNextPage: Boolean! endCursor: String }
+type ReachableField {
+  operation: Operation!
+  target: SchemaField!
+  paths(first: Int = 100, after: String): SchemaPathConnection!
+}
+type ReachableFieldConnection { nodes: [ReachableField!]! pageInfo: PageInfo! }
+type ValidationResult { valid: Boolean! errors: [ValidationDiagnostic!]! }
+type SourceLocation { line: Int! column: Int! }
+type ValidationDiagnostic {
+  message: String!
+  coordinate: String
+  rule: String
+  locations: [SourceLocation!]!
+  field: SchemaField
+  inputValue: SchemaInputValue
+  expectedType: TypeRef
+  suggestions: [ValidationSuggestion!]!
+}
+type ValidationSuggestion {
+  message: String!
+  replacementField: SchemaField
+  replacementInputValue: SchemaInputValue
+}

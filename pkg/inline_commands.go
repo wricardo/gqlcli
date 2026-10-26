@@ -77,6 +77,7 @@ func (cs *InlineCommandSet) Commands() []*cli.Command {
 		cs.queryCommand(),
 		cs.mutationCommand(),
 		cs.validateCommand(),
+		cs.exploreCommand(),
 		cs.batchCommand(),
 		cs.describeCommand(),
 		cs.typesCommand(),

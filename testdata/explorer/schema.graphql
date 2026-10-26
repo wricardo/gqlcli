@@ -1,0 +1,35 @@
+schema { query: RootQuery mutation: RootMutation subscription: RootSubscription }
+
+"""A person represented in an account."""
+interface Person { id: ID! name: String! }
+
+type Lead implements Person {
+  id: ID!
+  name: String!
+  email: String @deprecated(reason: "use contactEmail")
+  contactEmail: String
+  manager: Lead
+  colleagues: [Lead!]!
+  status: LeadStatus!
+}
+
+type Agent implements Person { id: ID! name: String! }
+union SearchResult = Lead | Agent
+
+enum LeadStatus { NEW ACTIVE ARCHIVED @deprecated(reason: "retired") }
+input CreateLeadInput {
+  email: String!
+  status: LeadStatus = NEW
+  manager: ID
+  note: String = """hello"""
+  statuses: [LeadStatus!] = [NEW, ACTIVE]
+}
+
+type RootQuery {
+  lead(id: ID!): Lead
+  leads(status: LeadStatus): [Lead!]!
+  alternate: Agent
+  search: [SearchResult!]!
+}
+type RootMutation { createLead(input: CreateLeadInput!): Lead! }
+type RootSubscription { leadUpdated(id: ID!): Lead! }

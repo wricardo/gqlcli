@@ -1,0 +1,118 @@
+schema:
+  - schema.graphqls
+exec:
+  filename: generated.go
+  package: explorer
+model:
+  filename: model/models_gen.go
+  package: model
+resolver:
+  layout: follow-schema
+  dir: .
+  package: explorer
+  filename_template: "{name}.resolvers.go"
+models:
+  SchemaType:
+    fields:
+      sdl:
+        resolver: true
+      fields:
+        resolver: true
+      inputFields:
+        resolver: true
+      enumValues:
+        resolver: true
+      possibleTypes:
+        resolver: true
+      interfaces:
+        resolver: true
+      outgoing:
+        resolver: true
+      incoming:
+        resolver: true
+      operations:
+        resolver: true
+  SchemaField:
+    fields:
+      sdl:
+        resolver: true
+      parentType:
+        resolver: true
+      type:
+        resolver: true
+      arguments:
+        resolver: true
+  SchemaInputValue:
+    fields:
+      sdl:
+        resolver: true
+      parentField:
+        resolver: true
+      parentInputType:
+        resolver: true
+      type:
+        resolver: true
+  EnumValue:
+    fields:
+      sdl:
+        resolver: true
+      parentType:
+        resolver: true
+  Operation:
+    fields:
+      sdl:
+        resolver: true
+      rootField:
+        resolver: true
+      arguments:
+        resolver: true
+      returnType:
+        resolver: true
+      reachableTypes:
+        resolver: true
+  TypeRef:
+    fields:
+      namedType:
+        resolver: true
+      ofType:
+        resolver: true
+  SchemaEdge:
+    fields:
+      source:
+        resolver: true
+      target:
+        resolver: true
+      field:
+        resolver: true
+      inputValue:
+        resolver: true
+  SchemaPath:
+    fields:
+      from:
+        resolver: true
+      to:
+        resolver: true
+      segments:
+        resolver: true
+  ReachableField:
+    model:
+      - github.com/wricardo/gqlcli/pkg/explorer/model.ReachableField
+    fields:
+      paths:
+        resolver: true
+  ValidationDiagnostic:
+    fields:
+      field:
+        resolver: true
+      inputValue:
+        resolver: true
+      expectedType:
+        resolver: true
+      suggestions:
+        resolver: true
+  ValidationSuggestion:
+    fields:
+      replacementField:
+        resolver: true
+      replacementInputValue:
+        resolver: true

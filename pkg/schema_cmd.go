@@ -16,7 +16,7 @@ func (b *CLIBuilder) GetSchemaCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "schema",
 		Usage: "Manage the on-disk schema cache",
-		Description: "Schema commands (describe, queries, mutations, types, sdl, validate, embed)\n" +
+		Description: "Schema commands (describe, queries, mutations, types, sdl, validate, explore, embed)\n" +
 			"reuse the endpoint's introspection result cached on disk for --schema-cache-ttl.\n" +
 			"The cache entry is keyed by URL and headers, so each env and credential has its own.\n\n" +
 			"Examples:\n" +

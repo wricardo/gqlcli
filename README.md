@@ -475,6 +475,79 @@ gqlcli types --filter User --args --desc
 gqlcli types -f compact
 ```
 
+### Local GraphQL Schema Explorer
+
+`explore` accepts a GraphQL document **against the explorer's schema**, not the
+target API. Print that contract with `gqlcli explore --print-schema`; select a
+target using `--env`, `--url`, `--header`, or `--schema-file` just as with
+`validate`. The document can come from a positional argument, `--query`, or
+`--query-file`; use `--variables` / `--variables-file` and `--operation` for
+variables and multi-operation documents. Unlike most commands, `explore`
+defaults to standard JSON so selected nullable fields remain `null`; choose
+`--format toon` explicitly for compact human/agent output.
+
+```bash
+gqlcli explore --env prod --format json \
+  '{ overview { queryRoot { name } queryCount } }'
+gqlcli explore --schema-file schema.graphql --format json \
+  '{ element(coordinate: "Lead.email") { __typename coordinate sdl ... on SchemaField { type { signature namedType { name } } } } }'
+gqlcli explore --offline --format json \
+  '{ operation(coordinate: "RootQuery.lead") { arguments { coordinate required } } }'
+```
+
+`element` returns a concrete `SchemaElement`; select concrete-only relationships
+with inline fragments. Coordinates use actual target root names: `Lead`,
+`Lead.email`, `RootQuery.lead`, `RootQuery.lead(id:)`,
+`CreateLeadInput.email`, `LeadStatus.NEW`. `operation` projects a root field,
+sharing its coordinate; it does not create another graph node. Built-in scalars
+are included; `__` introspection types and directive coordinates are excluded.
+
+`paths(from:, to:, traversal:, maxDepth:, first:, after:)` walks directed
+relationships. `OUTPUT` uses `DECLARES_FIELD`, `RETURNS`, `POSSIBLE_TYPE`
+(interface to implementing object), `UNION_MEMBER`, and
+`DECLARES_ENUM_VALUE`. `INPUT` uses `DECLARES_INPUT_VALUE` and `ACCEPTS`;
+`ALL` includes those plus `IMPLEMENTS`. An abstract return type can be
+narrowed by an inline fragment before selecting a concrete field. All simple
+paths within `maxDepth` edges are ordered by edge count then edge ID sequence.
+`depth` counts graph edges; `fieldDepth` counts selected output fields once,
+including a terminal field. Recursive types do not repeat nodes within a path.
+
+```graphql
+{
+  reachableFields(matching: "email", first: 10, maxDepth: 8) {
+    nodes {
+      operation { coordinate }
+      target { coordinate }
+      paths(first: 2) {
+        nodes { depth fieldDepth segments { edge { kind source { coordinate } target { coordinate } } } }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+```
+
+Outer `reachableFields` cursors page **operation/field pairs**, not paths.
+Each pair's `paths(first:, after:)` cursor is independent and cannot be used
+for another pair. Path cursors bind the schema snapshot and query arguments;
+after a schema change, start pagination again. Exhaustive simple-path search
+can be exponential. Keep `maxDepth` small, page results, and expect an explicit
+resource-limit error if the requested search exceeds its safety budget.
+
+Explorer `sdl` renders each element's standalone declaration **on selection**,
+including metadata retained by the target schema. Introspection cannot recover
+original formatting or all applied directives, so this is canonical
+reconstruction rather than a byte-for-byte copy. `validate(document:)` checks
+an executable document against the cached *target* schema; it does not execute
+it. Neither explorer documents nor `validate` documents are sent to the target.
+On a missing or expired cache, fetching the target schema may send an
+introspection request. `--offline` requires an existing cache even if its TTL
+has expired; `--schema-file` requires no network. Refresh with
+`gqlcli schema refresh --env prod`, `--refresh-schema`, or clear the cache with
+`gqlcli schema clear`. In contrast, `query`, `mutation`, and `subscribe`
+execute operations against the target API.
+
 ### Environment Configuration
 
 #### Option 1 — Environment variable
@@ -1187,6 +1260,28 @@ script, err := cfg.ResolveScript("disable-inactive-users")
 result, err := runner.RunSource(ctx, "disable-inactive-users", script.Source, script.Function,
 	script.MergeInput(map[string]interface{}{"concurrency": 10}))
 ```
+
+### Schema Explorer from Go
+
+The CLI's explorer uses the same Go library API. Construct it from a parsed
+target schema (including `InlineExecutor.Schema()`), from saved SDL, or from
+a `Client`; the latter uses the client's normal introspection cache.
+
+```go
+explorer, err := gqlcli.NewSchemaExplorerFromClient(ctx, client)
+// For an embedded executable schema, no introspection is needed:
+// explorer, err := gqlcli.NewSchemaExplorer(inlineExecutor.Schema())
+if err != nil { return err }
+response, err := explorer.Execute(ctx,
+    `{ element(coordinate: "Lead.email") { coordinate sdl } }`, nil)
+// response contains the standard GraphQL data/errors envelope.
+```
+
+`ExplorerSDL()` returns the embedded, versioned explorer schema. An explorer
+instance indexes a fixed target schema snapshot; after refreshing an HTTP
+client's cache, construct a new explorer rather than retaining the old index.
+`ExecuteOperation(ctx, document, variables, operationName)` selects a named
+operation when a document contains several.
 
 ### Schema discovery from your own transport
 

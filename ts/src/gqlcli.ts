@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { ExecutionResult as GraphQLExecutionResult } from "graphql";
 import { executeBatch, type BatchOptions } from "./batch.ts";
 import { GraphQLClient, type ClientOptions, type RequestOptions } from "./client.ts";
 import { loadProjectConfig, mergeVariables, resolveEnv, resolveOperation, resolveScript, type ProjectConfig } from "./config.ts";
@@ -81,6 +82,11 @@ export class Gqlcli {
       throw err;
     });
     return this.explorer;
+  }
+
+  /** Execute a read-only explorer document locally; only schema introspection may contact the endpoint. */
+  async explore(document: string, variables?: Record<string, unknown>, operationName?: string): Promise<GraphQLExecutionResult> {
+    return (await this.schema()).explore(document, variables, operationName);
   }
 
   /** Drops the in-memory and on-disk schema so the next call introspects again. */

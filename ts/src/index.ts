@@ -2,6 +2,9 @@ export { Gqlcli, type GqlcliOptions, type OperationInput, type ExecutionResult, 
 export { GraphQLClient, mergeHeaders, defaultCacheDir, DEFAULT_SCHEMA_CACHE_TTL_MS, type ClientOptions, type RequestOptions, type RawResponse, type SchemaCacheOptions } from "./client.ts";
 export * from "./config.ts";
 export { SchemaExplorer, type OperationInfo, type OperationListOptions, type TypeInfo, type TypeListOptions, type DescribeOptions, type ValidationIssue, type ValidationResult } from "./schema.ts";
+export { ExplorerRuntime } from "./explorer/runtime.ts";
+export { ExplorerGraph, type ExplorerElement, type ExplorerEdge, type ExplorerPath, type PathConnection } from "./explorer/graph.ts";
+export type { ExecutionResult as ExplorerExecutionResult } from "graphql";
 export { printTypeCompact, fieldSignature, type PrintOptions } from "./typeprint.ts";
 export { operationKind } from "./operation.ts";
 export { jq, jqValue } from "./jq.ts";

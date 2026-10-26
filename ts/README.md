@@ -61,10 +61,81 @@ Also exported: `GraphQLClient`, `SchemaExplorer` (from introspection or SDL), `e
 `jq` (real jq compiled to WASM), `formatOutput` (`toon|json|json-pretty|compact|table|llm`),
 `.gqlcli.json` helpers.
 
+### Local GraphQL schema explorer
+
+The explorer accepts a GraphQL document against the **explorer schema**, not
+the target API. Print its contract with `gqlcli explore --print-schema`; the
+canonical source is `pkg/explorer/schema.graphqls` in this repository, copied
+byte-for-byte into the npm package at build time.
+
+```ts
+import { Gqlcli, SchemaExplorer } from "@wricardo/gqlcli";
+
+const gql = new Gqlcli({ env: "prod" });
+const result = await gql.explore(`
+  query Find($coord: String!) {
+    element(coordinate: $coord) {
+      __typename coordinate sdl
+      ... on SchemaField { parentType { name } type { signature namedType { name } } }
+    }
+  }
+`, { coord: "Lead.email" });
+
+// No endpoint, credentials, or network calls needed.
+const offline = SchemaExplorer.fromSDL(savedTargetSDL);
+const paths = await offline.explore(`{
+  paths(from: "RootQuery", to: "Lead.email", maxDepth: 6, first: 10) {
+    nodes { depth fieldDepth segments { edge { kind source { coordinate } target { coordinate } } } }
+    pageInfo { hasNextPage endCursor }
+  }
+}`);
+```
+
+`Gqlcli.explore(document, variables?, operationName?)` introspects the selected
+target once, using the same per-URL-and-credentials on-disk cache as Go;
+`refreshSchema()` clears the in-memory and on-disk schema so the next call
+fetches it again. `SchemaExplorer.fromSDL(...).explore(...)` stays offline.
+`gqlcli explore --schema-file schema.graphql` and `--offline` offer equivalent
+CLI workflows. Explorer documents and `validate(document:)` run locally;
+`query`, `mutation`, and `subscribe` send operations to the target.
+Only the *schema introspection* on a cache miss or refresh may contact it.
+
+Coordinates identify canonical declarations: `Lead`, `Lead.email`,
+`RootQuery.lead`, `RootQuery.lead(id:)`, `CreateLeadInput.email`, and
+`LeadStatus.NEW`. Use `element` with `__typename` / inline fragments to
+navigate actual objects, rather than parsing strings. An operation projects
+its root field and shares its coordinate. Built-in scalars are indexed;
+`__` introspection types and directive coordinates are not.
+
+Paths follow directed edges. `OUTPUT` allows field declarations, returns,
+interface-to-concrete possible types, union members, and enum declarations;
+`INPUT` allows argument/input-field declarations and input type references;
+`ALL` also includes object-to-interface implementation edges. Output
+selections through interface/union members require inline fragments in an
+executable target query. `depth` counts graph edges; `fieldDepth` counts
+GraphQL output field selections, including a terminal field. All unique
+simple paths within `maxDepth` are ordered by depth then edge identity.
+They may be exponentially numerous: paginate with `first`/`after`, use
+practical depth bounds, and handle explicit resource-limit errors.
+
+`reachableFields` paginates distinct (operation, field) pairs. Every node's
+`paths(first:, after:)` is **independent**: finishing the outer page does
+not fetch every nested path. Cursors bind the schema snapshot and query
+parameters; an inner cursor cannot be reused for another pair, and cursors
+from a refreshed schema are rejected. `sdl` is rendered on selection as
+canonical standalone SDL from metadata available in the schema; an
+introspection cache cannot restore original whitespace or applied directives
+that introspection did not report.
+
 ## Parity with the Go CLI
 
 `src/parity.test.ts` runs the Go binary and this library against the same GraphQL server and compares them. It builds
 `cmd/gqlcli` with `go build`, or uses `$GQLCLI_GO_BIN`; without either it is skipped.
+
+`src/explorer/parity.test.ts` compares local explorer results against
+`gqlcli explore --schema-file` using the same fixture, including actual
+cursor strings and lazy SDL. The copied explorer SDL has a separate
+byte-for-byte parity test.
 
 | Area | Compared | Result |
 |---|---|---|
@@ -75,6 +146,7 @@ Also exported: `GraphQLClient`, `SchemaExplorer` (from introspection or SDL), `e
 | `--jq`, `batch` (ndjson, array, `--batch-size`, `--jq`) | values | identical |
 | `script` results, `gql.each` and `strict` defaults | JSON, abort behavior | identical |
 | `validate` | verdict and `line:column` | identical |
+| `explore` (custom roots, entities, edges, SDL, paths, independent nested pagination) | complete JSON and cursors | identical on shared fixture |
 
 ## Known differences
 
