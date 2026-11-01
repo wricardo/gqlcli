@@ -411,6 +411,32 @@ gqlcli subscribe --op watch-messages
 
 `--op` is available on `query`, `mutation`, and `subscribe` commands. Using the wrong operation type returns an error. `op save --subscription` stores it with `"type": "subscription"`, reusing the `"query"` field for the GraphQL text (no separate `"subscription"` field).
 
+## Fragments (shared declarations)
+
+Declare reusable fragments in `.gqlcli.json` under `"fragments"`, keyed by fragment name:
+
+```json
+{
+  "fragments": {
+    "UserFields": "fragment UserFields on User { id name email }",
+    "UserCard": "fragment UserCard on User { ...UserFields profile { bio } }"
+  }
+}
+```
+
+When a document spreads a fragment it does not define, gqlcli appends the declared
+definition (and any fragments that definition spreads) before validating or
+sending. Works for `query`, `mutation`, `subscribe`, `batch`, and `--validate-only`,
+including documents loaded via `--query`, `--query-file`, positional args, and `--op`.
+
+```bash
+gqlcli query 'query { user(id: "1") { ...UserCard } }'
+```
+
+Rules: the JSON key must equal the fragment name inside the value; one definition per
+entry; document-local definitions win; unused declarations are not appended; a spread
+with no declaration fails locally naming the missing fragment.
+
 ## Batch operations
 
 Use `batch` when all operations are known up front and do not depend on earlier responses. This

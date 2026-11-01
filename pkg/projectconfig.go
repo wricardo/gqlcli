@@ -29,6 +29,10 @@ type ProjectConfig struct {
 	Environments map[string]EnvConfig      `json:"environments"`
 	Operations   map[string]NamedOperation `json:"operations,omitempty"`
 	Scripts      map[string]NamedScript    `json:"scripts,omitempty"`
+	// Fragments holds reusable fragment definitions keyed by name. A document
+	// that spreads a fragment without defining it gets the declaration
+	// appended automatically before it is validated or executed.
+	Fragments map[string]string `json:"fragments,omitempty"`
 }
 
 // NamedOperation is a saved GraphQL query, mutation, or subscription stored in .gqlcli.json.

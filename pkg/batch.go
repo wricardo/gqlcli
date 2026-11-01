@@ -249,14 +249,28 @@ func (b *CLIBuilder) GetBatchCommand() *cli.Command {
 			}
 
 			if useArray {
-				return executeBatchArray(c, httpClient, input, clientJQ, batchSize)
+				return executeBatchArray(c, httpClient, input, clientJQ, batchSize, b.expandFragments)
 			}
-			return executeBatchNDJSON(c, httpClient, input, clientJQ, batchSize)
+			return executeBatchNDJSON(c, httpClient, input, clientJQ, batchSize, b.expandFragments)
 		},
 	}
 }
 
-func executeBatchNDJSON(c *cli.Context, client *HTTPClient, input io.Reader, clientJQ string, batchSize int) error {
+// expandBatchRequest appends declared fragments to one batch operation's
+// query before it is sent. Empty queries are left to the server.
+func expandBatchRequest(req *BatchRequest, expand func(string) (string, error)) error {
+	if expand == nil {
+		return nil
+	}
+	query, err := expand(req.Query)
+	if err != nil {
+		return err
+	}
+	req.Query = query
+	return nil
+}
+
+func executeBatchNDJSON(c *cli.Context, client *HTTPClient, input io.Reader, clientJQ string, batchSize int, expand func(string) (string, error)) error {
 	// Read all lines into batch requests
 	var requests []BatchRequest
 	scanner := bufio.NewScanner(input)
@@ -269,6 +283,9 @@ func executeBatchNDJSON(c *cli.Context, client *HTTPClient, input io.Reader, cli
 		var req BatchRequest
 		if err := json.Unmarshal(line, &req); err != nil {
 			return fmt.Errorf("invalid JSON on line: %w\nLine: %s", err, string(line))
+		}
+		if err := expandBatchRequest(&req, expand); err != nil {
+			return fmt.Errorf("batch operation: %w", err)
 		}
 		requests = append(requests, req)
 	}
@@ -287,7 +304,7 @@ func executeBatchNDJSON(c *cli.Context, client *HTTPClient, input io.Reader, cli
 	})
 }
 
-func executeBatchArray(c *cli.Context, client *HTTPClient, input io.Reader, clientJQ string, batchSize int) error {
+func executeBatchArray(c *cli.Context, client *HTTPClient, input io.Reader, clientJQ string, batchSize int, expand func(string) (string, error)) error {
 	data, err := io.ReadAll(input)
 	if err != nil {
 		return fmt.Errorf("failed to read input: %w", err)
@@ -315,6 +332,12 @@ func executeBatchArray(c *cli.Context, client *HTTPClient, input io.Reader, clie
 				return fmt.Errorf("invalid JSON: %w", err)
 			}
 			requests = append(requests, req)
+		}
+	}
+
+	for i := range requests {
+		if err := expandBatchRequest(&requests[i], expand); err != nil {
+			return fmt.Errorf("batch operation: %w", err)
 		}
 	}
 

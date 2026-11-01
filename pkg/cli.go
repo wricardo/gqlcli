@@ -1028,7 +1028,24 @@ func (b *CLIBuilder) getOperationFlags() []cli.Flag {
 	}
 }
 
+// expandFragments appends fragment declarations from .gqlcli.json for spreads
+// the document does not define itself.
+func (b *CLIBuilder) expandFragments(document string) (string, error) {
+	if b.projectConfig == nil || len(b.projectConfig.Fragments) == 0 {
+		return document, nil
+	}
+	return ExpandFragments(document, b.projectConfig.Fragments)
+}
+
 func (b *CLIBuilder) getQueryString(c *cli.Context) (string, error) {
+	document, err := b.resolveQueryString(c)
+	if err != nil {
+		return "", err
+	}
+	return b.expandFragments(document)
+}
+
+func (b *CLIBuilder) resolveQueryString(c *cli.Context) (string, error) {
 	if queryFile := c.String("query-file"); queryFile != "" {
 		data, err := os.ReadFile(queryFile)
 		if err != nil {
@@ -1064,6 +1081,14 @@ func (b *CLIBuilder) getQueryString(c *cli.Context) (string, error) {
 }
 
 func (b *CLIBuilder) getSubscriptionString(c *cli.Context) (string, error) {
+	document, err := b.resolveSubscriptionString(c)
+	if err != nil {
+		return "", err
+	}
+	return b.expandFragments(document)
+}
+
+func (b *CLIBuilder) resolveSubscriptionString(c *cli.Context) (string, error) {
 	if subscriptionFile := c.String("subscription-file"); subscriptionFile != "" {
 		data, err := os.ReadFile(subscriptionFile)
 		if err != nil {
@@ -1110,6 +1135,14 @@ func (b *CLIBuilder) getSubscriptionString(c *cli.Context) (string, error) {
 }
 
 func (b *CLIBuilder) getMutationString(c *cli.Context) (string, error) {
+	document, err := b.resolveMutationString(c)
+	if err != nil {
+		return "", err
+	}
+	return b.expandFragments(document)
+}
+
+func (b *CLIBuilder) resolveMutationString(c *cli.Context) (string, error) {
 	if mutationFile := c.String("mutation-file"); mutationFile != "" {
 		data, err := os.ReadFile(mutationFile)
 		if err != nil {

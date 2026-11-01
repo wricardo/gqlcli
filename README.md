@@ -680,6 +680,38 @@ Subscriptions are stored with `"type": "subscription"`, reusing the `query` fiel
 
 Use `--operation` when selecting a GraphQL operation from a multi-operation document. Use `--op` when running a saved operation from `.gqlcli.json`.
 
+### Saved Fragments
+
+Reusable fragment definitions live under the `fragments` key, keyed by fragment name:
+
+```json
+{
+  "fragments": {
+    "UserFields": "fragment UserFields on User { id name email }",
+    "UserWithProfile": "fragment UserWithProfile on User { ...UserFields profile { bio } }"
+  }
+}
+```
+
+When an executed document spreads a fragment it does not define, gqlcli appends the
+declaration from `.gqlcli.json` before validating or sending it. This applies to
+`query`, `mutation`, `subscribe`, `batch`, and `--validate-only`, regardless of
+whether the document came from `--query`, `--query-file`, a positional argument,
+or `--op`.
+
+```bash
+gqlcli query 'query { user(id: "1") { ...UserWithProfile } }'
+# sends: query { ... } + fragment UserWithProfile + fragment UserFields (transitive)
+```
+
+Rules:
+
+- The JSON key must match the fragment name declared inside the value.
+- One fragment definition per entry.
+- Fragments already defined in the document win; declared fragments never override them.
+- Unused declarations are not appended, so documents that need nothing are sent byte-for-byte.
+- A spread with no declaration fails locally with the fragment name instead of reaching the server.
+
 ### Saved Inline Scripts
 
 Store reusable JavaScript workflows under the `scripts` key in `.gqlcli.json`.
