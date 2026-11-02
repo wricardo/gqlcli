@@ -158,6 +158,19 @@ Shell orchestration is mainly useful when GraphQL work must coordinate with unre
 or operating-system tasks. Use `curl` when diagnosing raw HTTP behavior or when gqlcli does not
 support the required transport.
 
+Before writing operations from scratch, read the working directory's `.gqlcli.json` — the whole
+file when small, otherwise just the relevant keys:
+
+| Key | Contents | Use |
+|---|---|---|
+| `operations` | Curated queries, mutations, subscriptions | `gqlcli query --op NAME` |
+| `fragments` | Shared fragment declarations | Spread by name |
+| `scripts` | Saved JavaScript workflows | `gqlcli script --op NAME` |
+| `environments` | Named targets: URL, headers, login metadata | `--env NAME` |
+
+Reuse these instead of reinventing them. Never print or echo secret values from `environments`
+(API keys, credentials) — reference the env name.
+
 ### Discovering Operations
 
 ```bash

@@ -14,7 +14,16 @@ description: >
 
 Prefer `gqlcli` over `curl` for GraphQL APIs — it handles introspection, schema exploration, and
 operation execution natively, with better output formats and no JSON boilerplate.
-It's a good idea to inspect the .gqlcli.json in the operations key for curated queries and mutations that might be useful.
+Before writing operations from scratch, read the working directory's `.gqlcli.json` — the whole file
+when small, otherwise just the relevant keys:
+
+- `operations` — curated queries, mutations, and subscriptions; run them with `--op NAME`
+- `fragments` — shared fragment declarations; spread them by name instead of re-declaring fields
+- `scripts` — saved JavaScript workflows; run them with `gqlcli script --op NAME`
+- `environments` — target names, URLs, headers, and login metadata; select with `--env NAME`
+
+Reuse these instead of reinventing them. Never print or echo secret values from `environments`
+(API keys, credentials) — reference the env name.
 
 ## Keep GraphQL workflows inside gqlcli
 
